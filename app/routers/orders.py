@@ -1,0 +1,108 @@
+"""委托申请 / 委托查询。
+
+同行系统：委托申请无需登录；委托人可查询/修改/删除"未审核"的委托单。
+"""
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import or_
+from sqlalchemy.orm import Session
+
+from ..audit import log
+from ..database import get_db
+from ..deps import require_roles
+from ..models import EntrustOrder, User
+from ..notify import notify
+from ..numbering import next_order_no
+from ..schemas import OrderCreate, OrderUpdate
+from ..serializers import order_to_dict
+
+router = APIRouter(prefix="/api/orders", tags=["orders"])
+
+
+def _get_order(db: Session, order_id: int) -> EntrustOrder:
+    order = db.get(EntrustOrder, order_id)
+    if order is None:
+        raise HTTPException(404, "委托单不存在")
+    return order
+
+
+@router.post("")
+def create_order(data: OrderCreate, db: Session = Depends(get_db)):
+    order = EntrustOrder(**data.model_dump(), order_no=next_order_no(db))
+    db.add(order)
+    db.flush()
+    log(db, None, "委托申请", "order", order.id, f"{order.order_no} {order.sample_name}")
+    notify(db, "新委托待审核", f"{order.order_no} {order.sample_name}（{order.entrust_org}）", role="admin", order_id=order.id)
+    notify(db, "新委托待审核", f"{order.order_no} {order.sample_name}（{order.entrust_org}）", role="experimenter", order_id=order.id)
+    db.commit()
+    db.refresh(order)
+    return {"id": order.id, "order_no": order.order_no, "message": "委托申请提交成功"}
+
+
+@router.get("")
+def list_orders(
+    db: Session = Depends(get_db),
+    _: User = Depends(require_roles("admin", "experimenter")),
+    status: str | None = Query(None),
+    keyword: str | None = Query(None),
+):
+    q = db.query(EntrustOrder)
+    if status:
+        q = q.filter(EntrustOrder.status == status)
+    if keyword:
+        like = f"%{keyword}%"
+        q = q.filter(or_(
+            EntrustOrder.order_no.like(like),
+            EntrustOrder.experiment_no.like(like),
+            EntrustOrder.entruster.like(like),
+            EntrustOrder.entrust_org.like(like),
+            EntrustOrder.sample_model.like(like),
+            EntrustOrder.sample_name.like(like),
+        ))
+    orders = q.order_by(EntrustOrder.id.desc()).all()
+    return [order_to_dict(o, with_detail=False) for o in orders]
+
+
+@router.get("/query")
+def public_query(
+    order_no: str = Query(""),
+    phone: str = Query(""),
+    db: Session = Depends(get_db),
+):
+    """委托人无需登录，凭委托单编号 + 联系电话查询。"""
+    q = db.query(EntrustOrder)
+    if order_no:
+        q = q.filter(EntrustOrder.order_no == order_no)
+    if phone:
+        q = q.filter(EntrustOrder.phone == phone)
+    if not order_no and not phone:
+        return []
+    orders = q.order_by(EntrustOrder.id.desc()).all()
+    return [order_to_dict(o, with_detail=False) for o in orders]
+
+
+@router.get("/{order_id}")
+def get_order(order_id: int, db: Session = Depends(get_db), _: User = Depends(require_roles("admin", "experimenter"))):
+    return order_to_dict(_get_order(db, order_id))
+
+
+@router.put("/{order_id}")
+def update_order(order_id: int, data: OrderUpdate, db: Session = Depends(get_db)):
+    order = _get_order(db, order_id)
+    if order.status != "待审核":
+        raise HTTPException(400, "仅未审核的委托单可修改")
+    for field, value in data.model_dump(exclude_unset=True).items():
+        setattr(order, field, value)
+    log(db, None, "修改委托", "order", order.id, order.order_no)
+    db.commit()
+    return {"message": "修改成功"}
+
+
+@router.delete("/{order_id}")
+def delete_order(order_id: int, db: Session = Depends(get_db)):
+    order = _get_order(db, order_id)
+    if order.status != "待审核":
+        raise HTTPException(400, "仅未审核的委托单可删除")
+    log(db, None, "删除委托", "order", order.id, order.order_no)
+    db.delete(order)
+    db.commit()
+    return {"message": "删除成功"}

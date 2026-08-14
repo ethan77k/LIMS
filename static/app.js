@@ -1,0 +1,1301 @@
+/* 实验室信息管理系统 LIMS —— 前端 SPA（Vue3，无构建） */
+const { createApp, reactive, computed, onMounted } = Vue;
+
+/* ---------------- 全局状态 ---------------- */
+const state = reactive({
+  token: localStorage.getItem('lims_token') || '',
+  role: localStorage.getItem('lims_role') || '',
+  name: localStorage.getItem('lims_name') || '',
+  route: '/dashboard',
+  toast: { msg: '', type: '' },
+});
+
+/* ---------------- 角色权限与默认首页 ---------------- */
+const ROLE_ROUTES = {
+  admin: ['/dashboard', '/orders/new', '/orders/query', '/review', '/samples', '/schedule', '/experiment', '/reports', '/equipment', '/boards', '/handover', '/statistics', '/customers', '/audit', '/users'],
+  experimenter: ['/dashboard', '/orders/query', '/review', '/samples', '/schedule', '/experiment', '/reports', '/boards', '/handover', '/statistics', '/customers'],
+  entruster: ['/orders/new', '/orders/query'],
+};
+function homeRoute(role) { return role === 'entruster' ? '/orders/query' : '/dashboard'; }
+
+/* ---------------- 工具函数 ---------------- */
+async function api(path, method = 'GET', body = null) {
+  const headers = {};
+  if (state.token) headers['Authorization'] = 'Bearer ' + state.token;
+  if (body !== null) headers['Content-Type'] = 'application/json';
+  const res = await fetch(path, { method, headers, body: body !== null ? JSON.stringify(body) : null });
+  const ct = res.headers.get('content-type') || '';
+  const data = ct.includes('json') ? await res.json() : await res.text();
+  if (res.status === 401) { logout(); throw new Error('未登录或登录已过期'); }
+  if (!res.ok) throw new Error((data && data.detail) || (data && data.message) || '请求失败');
+  return data;
+}
+
+function toast(msg, type = '') {
+  state.toast.msg = msg; state.toast.type = type;
+  setTimeout(() => { state.toast.msg = ''; }, 2500);
+}
+
+function logout() {
+  state.token = ''; state.role = ''; state.name = '';
+  localStorage.removeItem('lims_token'); localStorage.removeItem('lims_role'); localStorage.removeItem('lims_name');
+  state.route = '/dashboard';
+}
+
+function navigate(r) { location.hash = r; }
+
+function fmtDT(v) { return v ? String(v).replace('T', ' ').slice(0, 16) : ''; }
+function fmtD(v) { return v ? String(v).slice(0, 10) : ''; }
+function fmtLocal(v) { return v ? String(v).slice(0, 16) : ''; }
+
+const ORDER_STATUS = {
+  '待审核': 'gray', '已审核': 'blue', '已排期': 'purple', '实验中': 'orange', '已完成': 'green', '已否决': 'red',
+};
+const SAMPLE_STATUS = {
+  '待接收': 'gray', '已接收': 'blue', '已排期': 'purple', '实验中': 'orange', '已完成': 'green',
+  '已退还': 'gray', '已报废': 'red', '已留存': 'green',
+};
+function badge(status, map) { const c = (map || ORDER_STATUS)[status] || 'gray'; return `<span class="badge ${c}">${status}</span>`; }
+
+/* ---------------- 登录页 ---------------- */
+const LoginPage = {
+  data: () => ({ username: '', password: '', error: '' }),
+  methods: {
+    async login() {
+      try {
+        const r = await api('/api/auth/login', 'POST', { username: this.username, password: this.password });
+        state.token = r.access_token; state.role = r.role; state.name = r.name;
+        localStorage.setItem('lims_token', r.access_token);
+        localStorage.setItem('lims_role', r.role); localStorage.setItem('lims_name', r.name);
+        location.hash = homeRoute(r.role);
+        state.route = homeRoute(r.role);
+        toast('登录成功', 'success');
+      } catch (e) { this.error = e.message; }
+    },
+    goPublic() { state.route = '/orders/new'; },
+  },
+  template: `
+  <div class="login-wrap">
+    <div class="login-card">
+      <h1>实验室信息管理系统</h1>
+      <div class="sub">Laboratory Information Management System</div>
+      <div class="form-group"><label>用户名</label><input v-model="username" @keyup.enter="login" placeholder="请输入用户名"></div>
+      <div class="form-group"><label>密码</label><input type="password" v-model="password" @keyup.enter="login" placeholder="请输入密码"></div>
+      <p v-if="error" style="color:#c62828;font-size:12px;margin-bottom:10px">{{error}}</p>
+      <button class="btn primary" style="width:100%" @click="login">登 录</button>
+      <button class="btn link" style="width:100%;margin-top:12px" @click="goPublic">免登录填写委托申请 →</button>
+    </div>
+  </div>`,
+};
+
+/* ---------------- 公共页（免登录） ---------------- */
+const PublicPage = {
+  data: () => ({ route: '' }),
+  computed: {
+    view() { return this.route; },
+  },
+  methods: { navigate, toLogin() { state.route = '/login'; } },
+  created() { this.route = state.route; },
+  template: `
+  <div>
+    <div class="topbar">
+      <div class="title">实验室信息管理系统</div>
+      <div class="user">
+        <a class="btn link" @click="navigate('/orders/new')">委托申请</a>
+        <a class="btn link" @click="navigate('/orders/query')">委托查询</a>
+        <button class="btn primary sm" @click="toLogin">登录</button>
+      </div>
+    </div>
+    <div class="content">
+      <order-new v-if="state.route === '/orders/new'"></order-new>
+      <order-query v-else-if="state.route === '/orders/query'"></order-query>
+      <div v-else>请选择功能</div>
+    </div>
+  </div>`,
+};
+
+/* ---------------- 主布局 ---------------- */
+const MainLayout = {
+  computed: {
+    nav() {
+      const menus = {
+        admin: [
+          { group: '工作台', links: [{ r: '/dashboard', t: '工作台' }] },
+          { group: '委托管理', links: [
+            { r: '/orders/new', t: '委托申请' }, { r: '/orders/query', t: '委托查询' }, { r: '/review', t: '委托审核' }] },
+          { group: '实验管理', links: [
+            { r: '/samples', t: '样品管理' }, { r: '/schedule', t: '实验排期' }, { r: '/experiment', t: '开始/结束实验' }] },
+          { group: '报告', links: [{ r: '/reports', t: '实验报告' }] },
+          { group: '统计', links: [{ r: '/statistics', t: '统计图表' }] },
+          { group: '资源', links: [
+            { r: '/equipment', t: '设备管理' }, { r: '/boards', t: '展板' }, { r: '/handover', t: '交接班' }, { r: '/customers', t: '客户档案' }] },
+          { group: '系统', links: [{ r: '/users', t: '用户管理' }, { r: '/audit', t: '审计日志' }] },
+        ],
+        experimenter: [
+          { group: '工作台', links: [{ r: '/dashboard', t: '工作台' }] },
+          { group: '委托管理', links: [
+            { r: '/orders/query', t: '委托查询' }, { r: '/review', t: '委托审核' }] },
+          { group: '实验管理', links: [
+            { r: '/samples', t: '样品管理' }, { r: '/schedule', t: '实验排期' }, { r: '/experiment', t: '开始/结束实验' }] },
+          { group: '报告', links: [{ r: '/reports', t: '实验报告' }] },
+          { group: '统计', links: [{ r: '/statistics', t: '统计图表' }] },
+          { group: '资源', links: [{ r: '/boards', t: '展板' }, { r: '/handover', t: '交接班' }, { r: '/customers', t: '客户档案' }] },
+        ],
+        entruster: [
+          { group: '委托', links: [{ r: '/orders/new', t: '委托申请' }, { r: '/orders/query', t: '委托查询' }] },
+        ],
+      };
+      return menus[state.role] || menus.entruster;
+    },
+    title() {
+      const m = {
+        '/dashboard': '工作台', '/orders/new': '委托申请', '/orders/query': '委托查询', '/review': '委托审核',
+        '/samples': '样品管理', '/schedule': '实验排期', '/experiment': '开始/结束实验', '/reports': '实验报告',
+        '/equipment': '设备管理', '/boards': '展板', '/handover': '交接班', '/statistics': '统计图表',
+        '/customers': '客户档案', '/audit': '审计日志', '/users': '用户管理',
+      };
+      return m[state.route] || '工作台';
+    },
+  },
+  data: () => ({ notifCount: 0, notifs: [], showNotif: false, showPwd: false, pwd: { old_password: '', new_password: '' } }),
+  methods: {
+    navigate, logout,
+    async loadNotifCount() { try { this.notifCount = (await api('/api/notifications/unread-count')).count; } catch (e) {} },
+    async openNotif() {
+      this.showNotif = !this.showNotif;
+      if (this.showNotif) { try { this.notifs = await api('/api/notifications'); } catch (e) {} }
+    },
+    async markRead(n) {
+      if (!n.is_read) { await api('/api/notifications/' + n.id + '/read', 'POST'); this.loadNotifCount(); }
+      if (n.order_id) { navigate('/orders/query'); this.showNotif = false; }
+    },
+    async markAllRead() { await api('/api/notifications/read-all', 'POST'); this.notifs.forEach(n => n.is_read = true); this.loadNotifCount(); },
+    async changePwd() {
+      try {
+        if (!this.pwd.old_password || !this.pwd.new_password) { toast('请填写新旧密码', 'error'); return; }
+        await api('/api/auth/change-password', 'POST', this.pwd);
+        this.showPwd = false; this.pwd = { old_password: '', new_password: '' }; toast('密码已修改', 'success');
+      } catch (e) { toast(e.message, 'error'); }
+    },
+  },
+  mounted() { this.loadNotifCount(); },
+  template: `
+  <div class="layout">
+    <div class="sidebar">
+      <div class="brand"><span>LIMS</span><small>实验室信息管理系统</small></div>
+      <div class="nav">
+        <template v-for="g in nav">
+          <div class="group">{{g.group}}</div>
+          <a v-for="l in g.links" :class="{active: state.route===l.r}" @click="navigate(l.r)">{{l.t}}</a>
+        </template>
+      </div>
+    </div>
+    <div class="main">
+      <div class="topbar">
+        <div class="title">{{title}}</div>
+        <div class="user">
+          <div class="notif">
+            <span class="bell" @click="openNotif">🔔</span><span class="badge-dot" v-if="notifCount">{{notifCount}}</span>
+            <div class="notif-panel" v-if="showNotif" @click.stop>
+              <div class="notif-head"><b>通知</b><a class="btn link sm" @click="markAllRead">全部已读</a></div>
+              <div class="notif-item" v-for="n in notifs" :key="n.id" :class="{unread: !n.is_read}" @click="markRead(n)">
+                <div class="notif-title">{{n.title}}</div>
+                <div class="notif-content">{{n.content}}</div>
+                <div class="notif-time">{{fmtDT(n.created_at)}}</div>
+              </div>
+              <div v-if="!notifs.length" class="notif-empty">暂无通知</div>
+            </div>
+          </div>
+          <span>{{state.name}}</span><span class="role-tag">{{roleText(state.role)}}</span>
+          <button class="btn sm" @click="showPwd=true">改密</button>
+          <button class="btn sm" @click="logout">退出</button>
+        </div>
+      </div>
+      <div class="content">
+        <dashboard v-if="state.route==='/dashboard'"></dashboard>
+        <order-new v-else-if="state.route==='/orders/new'"></order-new>
+        <order-query v-else-if="state.route==='/orders/query'"></order-query>
+        <review-view v-else-if="state.route==='/review'"></review-view>
+        <samples-view v-else-if="state.route==='/samples'"></samples-view>
+        <schedule-view v-else-if="state.route==='/schedule'"></schedule-view>
+        <experiment-view v-else-if="state.route==='/experiment'"></experiment-view>
+        <reports-view v-else-if="state.route==='/reports'"></reports-view>
+        <equipment-view v-else-if="state.route==='/equipment'"></equipment-view>
+        <boards-view v-else-if="state.route==='/boards'"></boards-view>
+        <handover-view v-else-if="state.route==='/handover'"></handover-view>
+        <statistics-view v-else-if="state.route==='/statistics'"></statistics-view>
+        <customers-view v-else-if="state.route==='/customers'"></customers-view>
+        <audit-view v-else-if="state.route==='/audit'"></audit-view>
+        <users-view v-else-if="state.route==='/users'"></users-view>
+      </div>
+    </div>
+    <div class="modal-mask" v-if="showPwd" @click.self="showPwd=false">
+      <div class="modal" style="width:380px">
+        <h3>修改密码</h3>
+        <div class="form-group"><label>原密码</label><input type="password" v-model="pwd.old_password"></div>
+        <div class="form-group"><label>新密码</label><input type="password" v-model="pwd.new_password"></div>
+        <div class="modal-actions"><button class="btn" @click="showPwd=false">取消</button><button class="btn primary" @click="changePwd">确认修改</button></div>
+      </div>
+    </div>
+  </div>`,
+};
+function roleText(r) { return { admin: '管理员', experimenter: '实验员', entruster: '委托人' }[r] || r; }
+
+/* ---------------- 工作台 ---------------- */
+const Dashboard = {
+  data: () => ({ stats: {}, pending: [], todo: [], expiring: [] }),
+  methods: {
+    async load() {
+      const [s, w] = await Promise.all([api('/api/dashboard/stats'), api('/api/dashboard/workbench')]);
+      this.stats = s; this.pending = w.pending; this.todo = w.todo;
+      try { this.expiring = await api('/api/equipment/expiring/list?days=30'); } catch (e) {}
+    },
+    badge,
+  },
+  mounted() { this.load(); },
+  template: `
+  <div>
+    <div class="grid-stats">
+      <div class="stat b"><div class="num">{{stats.total_orders||0}}</div><div class="label">委托单总数</div></div>
+      <div class="stat"><div class="num">{{stats.pending_review||0}}</div><div class="label">待审核</div></div>
+      <div class="stat o"><div class="num">{{stats.running||0}}</div><div class="label">实验中</div></div>
+      <div class="stat g"><div class="num">{{stats.finished||0}}</div><div class="label">已完成</div></div>
+      <div class="stat r"><div class="num">{{stats.rejected||0}}</div><div class="label">已否决</div></div>
+      <div class="stat"><div class="num">{{stats.total_equipment||0}}</div><div class="label">设备</div></div>
+      <div class="stat"><div class="num">{{stats.total_samples||0}}</div><div class="label">样品</div></div>
+    </div>
+    <div class="two-col">
+      <div class="card">
+        <h3>待审核委托</h3>
+        <table class="tbl"><thead><tr><th>编号</th><th>委托单位</th><th>委托人</th><th>检测项目</th><th>委托时间</th><th>操作</th></tr></thead>
+        <tbody>
+          <tr v-for="o in pending" :key="o.id">
+            <td>{{o.order_no}}</td><td>{{o.entrust_org}}</td><td>{{o.entruster}}</td><td>{{o.test_item}}</td><td>{{fmtD(o.created_at)}}</td>
+            <td><button class="btn link" @click="navigate('/review')">审核</button></td>
+          </tr>
+          <tr v-if="!pending.length"><td colspan="6" class="empty">暂无待审核委托</td></tr>
+        </tbody></table>
+      </div>
+      <div class="card">
+        <h3>待做实验</h3>
+        <table class="tbl"><thead><tr><th>实验编号</th><th>产品型号</th><th>检测项目</th><th>状态</th><th>操作</th></tr></thead>
+        <tbody>
+          <tr v-for="o in todo" :key="o.id">
+            <td>{{o.experiment_no||'-'}}</td><td>{{o.sample_model}}</td><td>{{o.test_item}}</td>
+            <td v-html="badge(o.status)"></td>
+            <td><button class="btn link" @click="navigate('/experiment')">处理</button></td>
+          </tr>
+          <tr v-if="!todo.length"><td colspan="5" class="empty">暂无待做实验</td></tr>
+        </tbody></table>
+      </div>
+    </div>
+    <div class="card" v-if="expiring.length">
+      <h3>设备到期提醒（30天内）</h3>
+      <table class="tbl"><thead><tr><th>设备名称</th><th>编号</th><th>校准有效期</th><th>剩余天数</th></tr></thead>
+      <tbody>
+        <tr v-for="e in expiring" :key="e.id">
+          <td>{{e.name}}</td><td>{{e.code||'-'}}</td><td>{{fmtD(e.valid_to)}}</td><td>{{e.days_left}} 天</td>
+        </tr>
+      </tbody></table>
+    </div>
+  </div>`,
+};
+
+/* ---------------- 委托申请 ---------------- */
+const OrderNew = {
+  data: () => ({ form: emptyOrder(), result: null, customers: [] }),
+  methods: {
+    async loadCustomers() { try { this.customers = await api('/api/customers'); } catch (e) {} },
+    onCustomerPick() {
+      const c = this.customers.find(x => x.name === this.form.entrust_org);
+      if (c) { if (!this.form.phone && c.phone) this.form.phone = c.phone; if (!this.form.email && c.email) this.form.email = c.email; }
+    },
+    async submit() {
+      if (!this.form.entruster || !this.form.sample_name || !this.form.test_item) {
+        toast('请填写委托人、样品名称、检测项目', 'error'); return;
+      }
+      try {
+        const r = await api('/api/orders', 'POST', this.form);
+        this.result = r; toast('提交成功', 'success');
+      } catch (e) { toast(e.message, 'error'); }
+    },
+    reset() { this.form = emptyOrder(); this.result = null; },
+  },
+  mounted() { this.loadCustomers(); },
+  template: `
+  <div class="card">
+    <h3>实验委托申请 <span style="font-size:12px;color:#c62828">（红色标记为必填项）</span></h3>
+    <div v-if="result" style="background:#e6f4ea;padding:12px;border-radius:6px;margin-bottom:14px">
+      委托申请提交成功！委托单编号：<b>{{result.order_no}}</b>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label><span class="req">*</span>委托单位</label><input v-model="form.entrust_org" list="customer-list" @change="onCustomerPick"></div>
+      <div class="form-group"><label>委托单位(英文)</label><input v-model="form.entrust_org_en"></div>
+      <div class="form-group"><label><span class="req">*</span>委托人</label><input v-model="form.entruster"></div>
+      <div class="form-group"><label>委托人(英文)</label><input v-model="form.entruster_en"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label><span class="req">*</span>样品名称</label><input v-model="form.sample_name"></div>
+      <div class="form-group"><label>样品名称(英文)</label><input v-model="form.sample_name_en"></div>
+      <div class="form-group"><label>样品型号</label><input v-model="form.sample_model"></div>
+      <div class="form-group"><label>客户型号</label><input v-model="form.customer_model"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label><span class="req">*</span>检测项目</label><input v-model="form.test_item"></div>
+      <div class="form-group"><label>检测项目(英文)</label><input v-model="form.test_item_en"></div>
+      <div class="form-group" style="flex:0 0 100px"><label><span class="req">*</span>数量</label><input type="number" v-model.number="form.sample_count"></div>
+      <div class="form-group" style="flex:0 0 90px"><label>单位</label><input v-model="form.sample_unit"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>检测依据</label><input v-model="form.test_basis" placeholder="没有则填客户自定义条件"></div>
+      <div class="form-group"><label>检测依据(英文)</label><input v-model="form.test_basis_en"></div>
+      <div class="form-group"><label>试验原因</label><select v-model="form.test_reason"><option>例行试验</option><option>型式试验</option><option>委托试验</option></select></div>
+      <div class="form-group"><label>报告要求</label><select v-model="form.report_lang"><option>中文</option><option>英文</option><option>中英双语</option></select></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label><span class="req">*</span>联系电话</label><input v-model="form.phone"></div>
+      <div class="form-group"><label><span class="req">*</span>内网邮箱</label><input v-model="form.email"></div>
+      <div class="form-group"><label>跟踪人</label><input v-model="form.tracker"></div>
+      <div class="form-group"><label>跟踪人邮箱</label><input v-model="form.tracker_email" placeholder="多个用逗号/分号分隔"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>样品状态</label><input v-model="form.sample_status"></div>
+      <div class="form-group"><label>存放要求</label><input v-model="form.storage_require"></div>
+      <div class="form-group"><label>样品处理</label><select v-model="form.sample_dispose"><option>退还</option><option>报废</option><option>留存</option></select></div>
+      <div class="form-group"><label>要求开始时间</label><input type="datetime-local" v-model="form.required_start"></div>
+    </div>
+    <div class="form-group"><label>试验条件</label><textarea v-model="form.test_condition"></textarea></div>
+    <div class="form-group"><label>备注</label><textarea v-model="form.remark"></textarea></div>
+    <div style="margin-top:10px">
+      <button class="btn primary" @click="submit">提交申请</button>
+      <button class="btn" style="margin-left:10px" @click="reset">重置</button>
+    </div>
+    <datalist id="customer-list"><option v-for="c in customers" :key="c.id" :value="c.name">{{c.contact}}</option></datalist>
+  </div>`,
+};
+function emptyOrder() {
+  return {
+    entrust_org: '', entrust_org_en: '', entruster: '', entruster_en: '',
+    sample_name: '', sample_name_en: '', test_item: '', test_item_en: '', test_basis: '', test_basis_en: '',
+    sample_model: '', customer_model: '', sample_count: 1, sample_unit: '只',
+    phone: '', email: '', tracker: '', tracker_email: '', test_reason: '例行试验', report_lang: '中文',
+    sample_status: '样品正常', storage_require: '常温存放', sample_dispose: '退还',
+    test_condition: '', remark: '', required_start: '',
+  };
+}
+
+/* ---------------- 委托查询 ---------------- */
+const OrderQuery = {
+  data: () => ({ order_no: '', phone: '', list: [], status: '', keyword: '', all: [] }),
+  methods: {
+    async search() {
+      if (!state.token) {
+        if (!this.order_no && !this.phone) { toast('请输入委托单编号或联系电话', 'error'); return; }
+        this.list = await api(`/api/orders/query?order_no=${this.order_no}&phone=${this.phone}`);
+        return;
+      }
+      const q = new URLSearchParams();
+      if (this.status) q.set('status', this.status);
+      if (this.keyword) q.set('keyword', this.keyword);
+      this.all = await api('/api/orders?' + q.toString());
+    },
+    badge, fmtDT,
+  },
+  mounted() { if (state.token && state.role !== 'entruster') this.search(); },
+  template: `
+  <div class="card">
+    <h3>实验委托查询</h3>
+    <div v-if="!state.token">
+      <div class="toolbar">
+        <input v-model="order_no" placeholder="委托单编号"><input v-model="phone" placeholder="联系电话">
+        <button class="btn primary" @click="search">查询</button>
+      </div>
+      <table class="tbl"><thead><tr><th>编号</th><th>委托单位</th><th>委托人</th><th>样品名称</th><th>检测项目</th><th>状态</th><th>委托时间</th></tr></thead>
+      <tbody>
+        <tr v-for="o in list" :key="o.id">
+          <td>{{o.order_no}}</td><td>{{o.entrust_org}}</td><td>{{o.entruster}}</td><td>{{o.sample_name}}</td>
+          <td>{{o.test_item}}</td><td v-html="badge(o.status)"></td><td>{{fmtD(o.created_at)}}</td>
+        </tr>
+        <tr v-if="!list.length"><td colspan="7" class="empty">输入条件后查询</td></tr>
+      </tbody></table>
+    </div>
+    <div v-else>
+      <div class="toolbar">
+        <select v-model="status"><option value="">全部状态</option>
+          <option v-for="s in ['待审核','已审核','已排期','实验中','已完成','已否决']" :key="s" :value="s">{{s}}</option></select>
+        <input v-model="keyword" placeholder="编号/委托人/单位/型号/样品名"><button class="btn primary" @click="search">查询</button>
+      </div>
+      <table class="tbl"><thead><tr><th>委托编号</th><th>实验编号</th><th>委托单位</th><th>委托人</th><th>样品</th><th>检测项目</th><th>状态</th><th>委托时间</th></tr></thead>
+      <tbody>
+        <tr v-for="o in all" :key="o.id">
+          <td>{{o.order_no}}</td><td>{{o.experiment_no||'-'}}</td><td>{{o.entrust_org}}</td><td>{{o.entruster}}</td>
+          <td>{{o.sample_name}} ×{{o.sample_count}}</td><td>{{o.test_item}}</td><td v-html="badge(o.status)"></td><td>{{fmtD(o.created_at)}}</td>
+        </tr>
+        <tr v-if="!all.length"><td colspan="8" class="empty">暂无数据</td></tr>
+      </tbody></table>
+    </div>
+  </div>`,
+};
+
+/* ---------------- 委托审核 ---------------- */
+const ReviewView = {
+  data: () => ({ list: [], detail: null, reviewers: [], allEq: [], showModal: false, feeRows: [], rejectReason: '', current: null }),
+  methods: {
+    async load() {
+      this.list = await api('/api/orders?status=待审核');
+      this.reviewers = (await api('/api/auth/users')).filter(u => u.role !== 'entruster');
+    },
+    async open(o) {
+      this.current = o; this.detail = await api('/api/orders/' + o.id);
+      this.reviewers = (await api('/api/auth/users')).filter(u => u.role !== 'entruster');
+      this.allEq = await api('/api/equipment');
+      this.rejectReason = ''; this.showModal = true;
+      this.feeRows = [{ test_item: this.detail.test_item, equipment_id: null, count: 1, quantity: this.detail.sample_count || 1, discount: 1 }];
+    },
+    addFee() { this.feeRows.push({ test_item: this.detail.test_item, equipment_id: null, count: 1, quantity: this.detail.sample_count || 1, discount: 1 }); },
+    async approve() {
+      try {
+        const costs = this.feeRows.filter(r => r.equipment_id).map(r => ({
+          equipment_id: r.equipment_id, test_item: r.test_item, count: Number(r.count) || 1, quantity: Number(r.quantity) || 1, discount: Number(r.discount) || 1,
+        }));
+        await api('/api/review/' + this.current.id, 'POST', { approve: true, reviewer_id: this.detail.reviewer_id || null, costs });
+        toast('审核通过', 'success'); this.showModal = false; this.load();
+      } catch (e) { toast(e.message, 'error'); }
+    },
+    async reject() {
+      try {
+        await api('/api/review/' + this.current.id, 'POST', { approve: false, reject_reason: this.rejectReason });
+        toast('已否决', 'success'); this.showModal = false; this.load();
+      } catch (e) { toast(e.message, 'error'); }
+    },
+    badge,
+  },
+  mounted() { this.load(); },
+  template: `
+  <div class="card">
+    <h3>委托审核</h3>
+    <table class="tbl"><thead><tr><th>委托编号</th><th>委托单位</th><th>委托人</th><th>样品</th><th>检测项目</th><th>委托时间</th><th>操作</th></tr></thead>
+    <tbody>
+      <tr v-for="o in list" :key="o.id">
+        <td>{{o.order_no}}</td><td>{{o.entrust_org}}</td><td>{{o.entruster}}</td><td>{{o.sample_name}} ×{{o.sample_count}}</td>
+        <td>{{o.test_item}}</td><td>{{fmtD(o.created_at)}}</td>
+        <td><button class="btn primary sm" @click="open(o)">审核</button></td>
+      </tr>
+      <tr v-if="!list.length"><td colspan="7" class="empty">暂无待审核委托</td></tr>
+    </tbody></table>
+  </div>
+  <div class="modal-mask" v-if="showModal" @click.self="showModal=false">
+    <div class="modal" style="width:860px">
+      <h3>审核委托申请</h3>
+      <div v-if="detail">
+        <table class="tbl"><tbody>
+          <tr><td style="width:100px" class="lbl">委托单位</td><td>{{detail.entrust_org}}</td><td style="width:80px" class="lbl">委托人</td><td>{{detail.entruster}}</td></tr>
+          <tr><td class="lbl">样品</td><td>{{detail.sample_name}} / {{detail.sample_model}} ×{{detail.sample_count}}{{detail.sample_unit}}</td><td class="lbl">检测项目</td><td>{{detail.test_item}}</td></tr>
+          <tr><td class="lbl">检测依据</td><td colspan="3">{{detail.test_basis || '客户自定义条件'}}</td></tr>
+          <tr><td class="lbl">联系电话</td><td>{{detail.phone}}</td><td class="lbl">要求时间</td><td>{{fmtDT(detail.required_start)}}</td></tr>
+        </tbody></table>
+
+        <h4 style="margin:14px 0 8px">实验员</h4>
+        <div class="form-group"><select v-model="detail.reviewer_id">
+          <option v-for="r in reviewers" :value="r.id">{{r.name}}（{{roleText(r.role)}}）</option>
+        </select></div>
+
+        <h4 style="margin:14px 0 8px">费用明细（选择设备自动带出计价）</h4>
+        <table class="tbl"><thead><tr><th>试验项目</th><th>设备</th><th>次数/时长</th><th>数量</th><th>折扣</th><th></th></tr></thead>
+        <tbody>
+          <tr v-for="(r,i) in feeRows" :key="i">
+            <td><input v-model="r.test_item" style="width:100%;padding:4px"></td>
+            <td><select v-model="r.equipment_id" style="width:100%;padding:4px"><option :value="null">选择设备</option>
+              <option v-for="e in allEq" :value="e.id">{{e.name}}</option></select></td>
+            <td><input type="number" v-model.number="r.count" style="width:70px;padding:4px"></td>
+            <td><input type="number" v-model.number="r.quantity" style="width:70px;padding:4px"></td>
+            <td><input type="number" step="0.1" v-model.number="r.discount" style="width:70px;padding:4px"></td>
+            <td><button class="btn link" @click="feeRows.splice(i,1)">删除</button></td>
+          </tr>
+        </tbody></table>
+        <button class="btn sm" style="margin-top:8px" @click="addFee">+ 添加费用项</button>
+
+        <div class="form-group" style="margin-top:14px"><label>否决原因（否决时填写）</label><textarea v-model="rejectReason"></textarea></div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn danger" @click="reject">否决</button>
+        <button class="btn" @click="showModal=false">取消</button>
+        <button class="btn success" @click="approve">通过</button>
+      </div>
+    </div>
+  </div>`,
+};
+
+/* ---------------- 样品管理 ---------------- */
+const SamplesView = {
+  data: () => ({ orders: [], cur: null, samples: [], detail: null, showModal: false, eq: [] }),
+  methods: {
+    async load() { this.orders = await api('/api/orders?status='); },
+    async open(o) { this.cur = o; this.detail = await api('/api/orders/' + o.id); this.samples = this.detail.samples; this.showModal = true; },
+    async receive(s) {
+      const c = prompt('样品检查状况（默认：样品正常）', '样品正常') || '样品正常';
+      await api('/api/samples/' + s.id + '/receive', 'POST', { condition: c });
+      this.open(this.cur); toast('已接收', 'success');
+    },
+    async dispose(s, action) {
+      const r = prompt('备注', '') || '';
+      await api('/api/samples/' + s.id + '/dispose', 'POST', { action, remark: r });
+      this.open(this.cur); toast('已' + action, 'success');
+    },
+    badge, fmtDT,
+  },
+  mounted() { this.load(); },
+  template: `
+  <div class="card">
+    <h3>样品管理</h3>
+    <table class="tbl"><thead><tr><th>实验编号</th><th>委托单位</th><th>样品</th><th>数量</th><th>状态</th><th>操作</th></tr></thead>
+    <tbody>
+      <template v-for="o in orders" :key="o.id">
+        <tr v-if="o.status!=='待审核' && o.status!=='已否决'">
+          <td>{{o.experiment_no||o.order_no}}</td><td>{{o.entrust_org}}</td><td>{{o.sample_name}}</td><td>{{o.sample_count}}</td>
+          <td v-html="badge(o.status)"></td><td><button class="btn primary sm" @click="open(o)">样品管理</button></td>
+        </tr>
+      </template>
+      <tr v-if="!orders.length"><td colspan="6" class="empty">暂无委托单</td></tr>
+    </tbody></table>
+  </div>
+  <div class="modal-mask" v-if="showModal" @click.self="showModal=false">
+    <div class="modal" style="width:900px">
+      <h3>样品列表 —— {{cur.experiment_no||cur.order_no}}</h3>
+      <table class="tbl"><thead><tr><th>样品编号</th><th>状态</th><th>状况</th><th>结果</th><th>备注</th><th>操作</th></tr></thead>
+      <tbody>
+        <tr v-for="s in samples" :key="s.id">
+          <td>{{s.sample_no}}</td><td v-html="badge(s.status, {'待接收':'gray','已接收':'blue','已排期':'purple','实验中':'orange','已完成':'green','已退还':'gray','已报废':'red','已留存':'green'})"></td>
+          <td>{{s.condition}}</td><td>{{s.result||'-'}}</td><td>{{s.remark}}</td>
+          <td>
+            <button class="btn success sm" v-if="s.status==='待接收'" @click="receive(s)">接收</button>
+            <button class="btn sm" v-if="['已完成','实验中','已接收'].includes(s.status)" @click="dispose(s,'退还')">退还</button>
+            <button class="btn sm" v-if="['已完成','实验中','已接收'].includes(s.status)" @click="dispose(s,'报废')">报废</button>
+            <button class="btn sm" v-if="['已完成','实验中','已接收'].includes(s.status)" @click="dispose(s,'留存')">留存</button>
+            <details style="display:inline-block" v-if="s.operations&&s.operations.length"><summary style="cursor:pointer;color:#1e5aa8">明细</summary>
+              <div style="position:absolute;background:#fff;border:1px solid #e2e8f0;padding:8px;border-radius:6px;z-index:10;max-height:200px;overflow:auto">
+                <div v-for="op in s.operations" :key="op.id" style="font-size:12px;padding:2px 0">{{fmtDT(op.created_at)}} {{op.action}} · {{op.operator}} {{op.remark}}</div>
+              </div>
+            </details>
+          </td>
+        </tr>
+      </tbody></table>
+      <div class="modal-actions"><button class="btn" @click="showModal=false">关闭</button></div>
+    </div>
+  </div>`,
+};
+
+/* ---------------- 实验排期 ---------------- */
+const ScheduleView = {
+  data: () => ({ orders: [], cur: null, detail: null, eq: [], showModal: false, form: { sample_id: null, equipment_id: null, experiment_hours: 4, transition_hours: 0, plan_start: '' } }),
+  methods: {
+    async load() { this.orders = await api('/api/orders?status='); this.eq = await api('/api/equipment'); },
+    async open(o) { this.cur = o; this.detail = await api('/api/orders/' + o.id); this.showModal = true; },
+    async addSchedule() {
+      try {
+        if (!this.form.sample_id || !this.form.equipment_id) { toast('请选择样品和设备', 'error'); return; }
+        await api('/api/schedules', 'POST', { ...this.form, experiment_hours: Number(this.form.experiment_hours), transition_hours: Number(this.form.transition_hours) });
+        toast('排期成功', 'success'); this.open(this.cur);
+      } catch (e) { toast(e.message, 'error'); }
+    },
+    async del(s) { await api('/api/schedules/' + s.id, 'DELETE'); this.open(this.cur); },
+    badge, fmtDT,
+  },
+  mounted() { this.load(); },
+  template: `
+  <div class="card">
+    <h3>实验排期</h3>
+    <table class="tbl"><thead><tr><th>实验编号</th><th>委托单位</th><th>样品</th><th>检测项目</th><th>状态</th><th>操作</th></tr></thead>
+    <tbody>
+      <template v-for="o in orders" :key="o.id">
+        <tr v-if="['已审核','已排期','实验中'].includes(o.status)">
+          <td>{{o.experiment_no||o.order_no}}</td><td>{{o.entrust_org}}</td><td>{{o.sample_name}}</td><td>{{o.test_item}}</td>
+          <td v-html="badge(o.status)"></td><td><button class="btn primary sm" @click="open(o)">排期</button></td>
+        </tr>
+      </template>
+    </tbody></table>
+  </div>
+  <div class="modal-mask" v-if="showModal" @click.self="showModal=false">
+    <div class="modal" style="width:900px">
+      <h3>样品排期 —— {{cur.experiment_no||cur.order_no}}</h3>
+      <div class="form-row" style="background:#f7f9fc;padding:12px;border-radius:6px">
+        <div class="form-group"><label>样品</label><select v-model="form.sample_id">
+          <option :value="null">选择样品</option><option v-for="s in detail.samples" :value="s.id" :disabled="s.status!=='已接收'">{{s.sample_no}}（{{s.status}}）</option>
+        </select></div>
+        <div class="form-group"><label>设备</label><select v-model="form.equipment_id">
+          <option :value="null">选择设备</option><option v-for="e in eq" :value="e.id" :disabled="e.status!=='可用'">{{e.name}}（{{e.exp_type}}）</option>
+        </select></div>
+        <div class="form-group" style="flex:0 0 90px"><label>实验用时(h)</label><input type="number" v-model.number="form.experiment_hours"></div>
+        <div class="form-group" style="flex:0 0 90px"><label>过渡用时(h)</label><input type="number" v-model.number="form.transition_hours"></div>
+        <div class="form-group" style="flex:0 0 200px"><label>预计开始时间</label><input type="datetime-local" v-model="form.plan_start"></div>
+        <div class="form-group" style="flex:0 0 auto;align-self:flex-end"><button class="btn primary" @click="addSchedule">添加排期</button></div>
+      </div>
+      <table class="tbl" style="margin-top:14px"><thead><tr><th>样品编号</th><th>设备</th><th>实验用时</th><th>过渡用时</th><th>总用时</th><th>预计开始</th><th>预计结束</th><th>状态</th><th></th></tr></thead>
+      <tbody>
+        <tr v-for="s in detail.schedules" :key="s.id">
+          <td>{{s.sample_no}}</td><td>{{s.equipment_name}}</td><td>{{s.experiment_hours}}</td><td>{{s.transition_hours}}</td>
+          <td>{{s.total_hours}}</td><td>{{fmtDT(s.plan_start)}}</td><td>{{fmtDT(s.plan_end)}}</td><td v-html="badge(s.status)"></td>
+          <td><button class="btn link" v-if="s.status==='已排期'" @click="del(s)">删除</button></td>
+        </tr>
+        <tr v-if="!detail.schedules.length"><td colspan="9" class="empty">暂无排期</td></tr>
+      </tbody></table>
+      <div class="modal-actions"><button class="btn" @click="showModal=false">关闭</button></div>
+    </div>
+  </div>`,
+};
+
+/* ---------------- 开始/结束实验 ---------------- */
+const ExperimentView = {
+  data: () => ({ orders: [], cur: null, detail: null, showModal: false }),
+  methods: {
+    async load() { this.orders = await api('/api/orders?status='); },
+    async open(o) { this.cur = o; this.detail = await api('/api/orders/' + o.id); this.showModal = true; },
+    async start(s) { await api('/api/experiment/schedule/' + s.id + '/start', 'POST'); this.open(this.cur); toast('已开始', 'success'); },
+    async end(s) { await api('/api/experiment/schedule/' + s.id + '/end', 'POST'); this.open(this.cur); toast('已结束', 'success'); },
+    async setResult(s, r) { await api('/api/experiment/result', 'PUT', { sample_id: s.id, result: r }); this.open(this.cur); },
+    async finish() {
+      try { await api('/api/experiment/order/' + this.cur.id + '/finish', 'POST'); toast('实验已完成', 'success'); this.open(this.cur); this.load(); }
+      catch (e) { toast(e.message, 'error'); }
+    },
+    badge, fmtDT,
+  },
+  mounted() { this.load(); },
+  template: `
+  <div class="card">
+    <h3>开始 / 结束实验</h3>
+    <table class="tbl"><thead><tr><th>实验编号</th><th>委托单位</th><th>样品</th><th>检测项目</th><th>状态</th><th>操作</th></tr></thead>
+    <tbody>
+      <template v-for="o in orders" :key="o.id">
+        <tr v-if="['已排期','实验中'].includes(o.status)">
+          <td>{{o.experiment_no||o.order_no}}</td><td>{{o.entrust_org}}</td><td>{{o.sample_name}}</td><td>{{o.test_item}}</td>
+          <td v-html="badge(o.status)"></td><td><button class="btn primary sm" @click="open(o)">实验操作</button></td>
+        </tr>
+      </template>
+    </tbody></table>
+  </div>
+  <div class="modal-mask" v-if="showModal" @click.self="showModal=false">
+    <div class="modal" style="width:960px">
+      <h3>实验操作 —— {{cur.experiment_no||cur.order_no}}</h3>
+      <h4 style="margin:10px 0 6px">排期计划</h4>
+      <table class="tbl"><thead><tr><th>样品</th><th>设备</th><th>状态</th><th>预计开始</th><th>实际开始</th><th>实际结束</th><th>操作</th></tr></thead>
+      <tbody>
+        <tr v-for="s in detail.schedules" :key="s.id">
+          <td>{{s.sample_no}}</td><td>{{s.equipment_name}}</td><td v-html="badge(s.status)"></td>
+          <td>{{fmtDT(s.plan_start)}}</td><td>{{fmtDT(s.actual_start)}}</td><td>{{fmtDT(s.actual_end)}}</td>
+          <td>
+            <button class="btn success sm" v-if="s.status==='已排期'" @click="start(s)">开始</button>
+            <button class="btn sm" v-if="s.status==='实验中'" @click="end(s)">结束</button>
+          </td>
+        </tr>
+      </tbody></table>
+      <h4 style="margin:14px 0 6px">样品实验结果</h4>
+      <table class="tbl"><thead><tr><th>样品编号</th><th>状态</th><th>实验结果</th></tr></thead>
+      <tbody>
+        <tr v-for="s in detail.samples" :key="s.id">
+          <td>{{s.sample_no}}</td><td v-html="badge(s.status, {'待接收':'gray','已接收':'blue','已排期':'purple','实验中':'orange','已完成':'green','已退还':'gray','已报废':'red','已留存':'green'})"></td>
+          <td>
+            <div class="result-btns">
+              <button class="btn ok" :class="{sel: s.result==='OK'}" @click="setResult(s,'OK')">OK</button>
+              <button class="btn ng" :class="{sel: s.result==='NG'}" @click="setResult(s,'NG')">NG</button>
+            </div>
+          </td>
+        </tr>
+      </tbody></table>
+      <div class="modal-actions">
+        <button class="btn" @click="showModal=false">关闭</button>
+        <button class="btn success" @click="finish" :disabled="detail.status==='已完成'">结束全部实验</button>
+      </div>
+    </div>
+  </div>`,
+};
+
+/* ---------------- 实验报告 ---------------- */
+const ReportsView = {
+  data: () => ({ orders: [], cur: null, detail: null, showModal: false, tab: 'gen', archives: [], archType: '', archKeyword: '' }),
+  methods: {
+    async load() { this.orders = await api('/api/orders?status='); },
+    async loadArchive() {
+      const q = (this.archType ? 'type=' + encodeURIComponent(this.archType) : '') + (this.archKeyword ? (this.archType ? '&' : '') + 'keyword=' + encodeURIComponent(this.archKeyword) : '');
+      this.archives = await api('/api/reports/archive' + (q ? '?' + q : ''));
+    },
+    switchTab(t) { this.tab = t; if (t === 'arch') this.loadArchive(); },
+    async open(o) { this.cur = o; this.detail = await api('/api/orders/' + o.id); this.showModal = true; },
+    report(kind, version) {
+      let url = '/api/reports/' + kind + '/' + this.cur.id;
+      if (version) url += '?version=' + encodeURIComponent(version);
+      window.open(url, '_blank');
+    },
+    async issue(report_type, version) {
+      try { await api('/api/reports/' + this.cur.id + '/issue', 'POST', { report_type, version: version || '' }); toast('已签发并留档', 'success'); }
+      catch (e) { toast(e.message, 'error'); }
+    },
+    viewArchive(r) { window.open('/api/reports/archive/' + r.id + '/view', '_blank'); },
+    async delArchive(r) { if (confirm('确认作废报告 ' + r.report_no + '？')) { await api('/api/reports/archive/' + r.id, 'DELETE'); this.loadArchive(); } },
+    badge,
+  },
+  mounted() { this.load(); },
+  template: `
+  <div>
+    <div class="tabs">
+      <button class="tab" :class="{active:tab==='gen'}" @click="switchTab('gen')">生成报告</button>
+      <button class="tab" :class="{active:tab==='arch'}" @click="switchTab('arch')">归档列表</button>
+    </div>
+    <div class="card" v-if="tab==='gen'">
+      <h3>实验报告</h3>
+      <table class="tbl"><thead><tr><th>实验编号</th><th>委托单位</th><th>样品</th><th>检测项目</th><th>状态</th><th>操作</th></tr></thead>
+      <tbody>
+        <template v-for="o in orders" :key="o.id">
+          <tr v-if="o.status!=='待审核' && o.status!=='已否决'">
+            <td>{{o.experiment_no||o.order_no}}</td><td>{{o.entrust_org}}</td><td>{{o.sample_name}}</td><td>{{o.test_item}}</td>
+            <td v-html="badge(o.status)"></td><td><button class="btn primary sm" @click="open(o)">生成报告</button></td>
+          </tr>
+        </template>
+      </tbody></table>
+    </div>
+    <div class="card" v-if="tab==='arch'">
+      <div class="toolbar"><h3 style="flex:1">归档报告</h3>
+        <select v-model="archType" @change="loadArchive"><option value="">全部类型</option><option>委托记录单</option><option>检测报告</option></select>
+        <input v-model="archKeyword" placeholder="编号/样品/单位关键字" @keyup.enter="loadArchive"><button class="btn primary" @click="loadArchive">查询</button></div>
+      <table class="tbl"><thead><tr><th>报告编号</th><th>委托/实验编号</th><th>样品</th><th>委托单位</th><th>类型</th><th>版本</th><th>状态</th><th>签发时间</th><th>操作</th></tr></thead>
+      <tbody>
+        <tr v-for="r in archives" :key="r.id">
+          <td>{{r.report_no}}</td><td>{{r.order_no}} / {{r.experiment_no||'-'}}</td><td>{{r.sample_name}}</td><td>{{r.entrust_org}}</td><td>{{r.report_type}}</td><td>{{r.version||'-'}}</td>
+          <td v-html="badge(r.status)"></td><td>{{fmtDT(r.issued_at)}}</td>
+          <td><button class="btn link" @click="viewArchive(r)">查看</button><button class="btn link" v-if="state.role==='admin'" @click="delArchive(r)">作废</button></td>
+        </tr>
+        <tr v-if="!archives.length"><td colspan="9" class="empty">暂无归档报告</td></tr>
+      </tbody></table>
+    </div>
+    <div class="modal-mask" v-if="showModal" @click.self="showModal=false">
+      <div class="modal" style="width:520px">
+        <h3>报告类型</h3>
+        <p style="margin-bottom:16px;color:#6b7a90">实验编号：{{cur.experiment_no||cur.order_no}}　|　{{cur.sample_name}}　|　{{cur.test_item}}</p>
+        <button class="btn primary" style="width:100%;margin-bottom:10px" @click="report('entrust')">实验委托记录单（表-TC05-01A）</button>
+        <button class="btn" style="width:100%;margin-bottom:10px" @click="report('test','常规')">检测报告（常规版）</button>
+        <button class="btn" style="width:100%" @click="report('test','检测')">检测报告（检测版）</button>
+        <div style="border-top:1px dashed #e2e8f0;margin:16px 0;padding-top:14px">
+          <h4 style="margin-bottom:10px">签发并留档</h4>
+          <div class="form-row">
+            <button class="btn" style="flex:1" @click="issue('委托记录单','')">签发委托记录单</button>
+            <button class="btn" style="flex:1" @click="issue('检测报告','常规')">签发检测报告(常规)</button>
+            <button class="btn" style="flex:1" @click="issue('检测报告','检测')">签发检测报告(检测)</button>
+          </div>
+        </div>
+        <div class="modal-actions"><button class="btn" @click="showModal=false">关闭</button></div>
+      </div>
+    </div>
+  </div>`,
+};
+
+/* ---------------- 设备管理 ---------------- */
+const EquipmentView = {
+  data: () => ({ list: [], showModal: false, editing: null, form: emptyEq(), types: ['环境类测试', '运输类测试', '机械类测试', '表面类测试', '防水测试', '电性能类', '其它试验'], maintEq: null, maintList: [], maintShow: false, maintForm: emptyMaint(), maintEditing: null, maintFormShow: false, maintTypes: ['校准', '维修', '保养'] }),
+  methods: {
+    async load() { this.list = await api('/api/equipment'); },
+    add() { this.editing = null; this.form = emptyEq(); this.showModal = true; },
+    edit(e) { this.editing = e; this.form = { ...e, valid_from: fmtLocal(e.valid_from), valid_to: fmtLocal(e.valid_to) }; this.showModal = true; },
+    async save() {
+      try {
+        const payload = { ...this.form };
+        if (!payload.valid_from) payload.valid_from = null;
+        if (!payload.valid_to) payload.valid_to = null;
+        if (this.editing) await api('/api/equipment/' + this.editing.id, 'PUT', payload);
+        else await api('/api/equipment', 'POST', payload);
+        this.showModal = false; this.load(); toast('保存成功', 'success');
+      } catch (e) { toast(e.message, 'error'); }
+    },
+    async stop(e) { await api('/api/equipment/' + e.id + '/stop', 'POST'); this.load(); },
+    async del(e) { if (confirm('确认删除设备 ' + e.name + '？')) { await api('/api/equipment/' + e.id, 'DELETE'); this.load(); } },
+    async openMaint(e) { this.maintEq = e; this.maintList = await api('/api/equipment/' + e.id + '/maintenance'); this.maintShow = true; },
+    addMaint() { this.maintEditing = null; this.maintForm = emptyMaint(); this.maintFormShow = true; },
+    editMaint(m) { this.maintEditing = m; this.maintForm = { ...m, date: fmtD(m.date), next_date: fmtD(m.next_date) }; this.maintFormShow = true; },
+    async saveMaint() {
+      try {
+        const payload = { ...this.maintForm };
+        if (!payload.date) payload.date = null;
+        if (!payload.next_date) payload.next_date = null;
+        if (this.maintEditing) await api('/api/equipment/maintenance/' + this.maintEditing.id, 'PUT', payload);
+        else await api('/api/equipment/' + this.maintEq.id + '/maintenance', 'POST', payload);
+        this.maintList = await api('/api/equipment/' + this.maintEq.id + '/maintenance');
+        this.maintEditing = null; this.maintForm = emptyMaint(); this.maintFormShow = false; toast('保存成功', 'success');
+      } catch (e) { toast(e.message, 'error'); }
+    },
+    async delMaint(m) { if (confirm('确认删除该记录？')) { await api('/api/equipment/maintenance/' + m.id, 'DELETE'); this.maintList = await api('/api/equipment/' + this.maintEq.id + '/maintenance'); } },
+    badge: (s) => `<span class="badge ${s==='可用'?'green':s==='使用中'?'orange':s==='停用'?'gray':'red'}">${s}</span>`,
+    fmtD,
+  },
+  mounted() { this.load(); },
+  template: `
+  <div class="card">
+    <div class="toolbar"><h3 style="flex:1">实验设备列表</h3>
+      <button class="btn primary" @click="add" v-if="state.role==='admin'">添加设备</button></div>
+    <table class="tbl"><thead><tr><th>名称</th><th>排序</th><th>型号</th><th>编号</th><th>实验类型</th><th>开机费</th><th>电费/时</th><th>折旧/时</th><th>耗材/时</th><th>单价</th><th>功率(kW)</th><th>状态</th><th>管理</th></tr></thead>
+    <tbody>
+      <tr v-for="e in list" :key="e.id">
+        <td>{{e.name}}</td><td>{{e.sort_order}}</td><td>{{e.model}}</td><td>{{e.code}}</td><td>{{e.exp_type}}</td>
+        <td>{{e.open_fee}}</td><td>{{e.power_fee}}</td><td>{{e.depreciation_fee}}</td><td>{{e.consumable_fee}}</td><td>{{e.unit_price}}</td><td>{{e.power_kw}}</td><td v-html="badge(e.status)"></td>
+        <td>
+          <button class="btn link" @click="openMaint(e)">校准/维保</button>
+          <button class="btn link" @click="edit(e)">修改</button>
+          <button class="btn link" @click="stop(e)">{{ e.status==='停用'||e.status==='报废' ? '启用' : '停用' }}</button>
+          <button class="btn link" @click="del(e)">删除</button>
+        </td>
+      </tr>
+    </tbody></table>
+  </div>
+  <div class="modal-mask" v-if="showModal" @click.self="showModal=false">
+    <div class="modal" style="width:640px">
+      <h3>{{editing?'修改设备':'添加设备'}}</h3>
+      <div class="form-row">
+        <div class="form-group"><label>名称</label><input v-model="form.name"></div>
+        <div class="form-group"><label>型号</label><input v-model="form.model"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>编号</label><input v-model="form.code"></div>
+        <div class="form-group"><label>实验类型</label><select v-model="form.exp_type"><option v-for="t in types" :value="t">{{t}}</option></select></div>
+        <div class="form-group"><label>排序</label><input type="number" v-model.number="form.sort_order"></div>
+        <div class="form-group"><label>状态</label><select v-model="form.status"><option>可用</option><option>使用中</option><option>停用</option><option>报废</option></select></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>开机费(元)</label><input type="number" v-model.number="form.open_fee"></div>
+        <div class="form-group"><label>电费/小时</label><input type="number" v-model.number="form.power_fee"></div>
+        <div class="form-group"><label>折旧费/小时</label><input type="number" v-model.number="form.depreciation_fee"></div>
+        <div class="form-group"><label>耗材费/小时</label><input type="number" v-model.number="form.consumable_fee"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>设备单价(元)</label><input type="number" v-model.number="form.unit_price"></div>
+        <div class="form-group"><label>设备功率(kW)</label><input type="number" v-model.number="form.power_kw"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>有效期开始</label><input type="datetime-local" v-model="form.valid_from"></div>
+        <div class="form-group"><label>有效期结束</label><input type="datetime-local" v-model="form.valid_to"></div>
+      </div>
+      <div class="form-group"><label>备注</label><textarea v-model="form.remark"></textarea></div>
+      <div class="modal-actions"><button class="btn" @click="showModal=false">取消</button><button class="btn primary" @click="save">保存</button></div>
+    </div>
+  </div>
+  <div class="modal-mask" v-if="maintShow" @click.self="maintShow=false">
+    <div class="modal" style="width:720px">
+      <div class="toolbar"><h3 style="flex:1">{{maintEq.name}} —— 校准/维保记录</h3><button class="btn primary sm" @click="addMaint">新增记录</button></div>
+      <table class="tbl"><thead><tr><th>类型</th><th>日期</th><th>下次到期</th><th>费用</th><th>操作人</th><th>备注</th><th>操作</th></tr></thead>
+      <tbody>
+        <tr v-for="m in maintList" :key="m.id">
+          <td>{{m.type}}</td><td>{{fmtD(m.date)}}</td><td>{{fmtD(m.next_date)}}</td><td>{{m.cost}}</td><td>{{m.operator||'-'}}</td><td>{{m.note||'-'}}</td>
+          <td><button class="btn link" @click="editMaint(m)">修改</button><button class="btn link" @click="delMaint(m)">删除</button></td>
+        </tr>
+        <tr v-if="!maintList.length"><td colspan="7" class="empty">暂无记录</td></tr>
+      </tbody></table>
+      <div v-if="maintFormShow" style="border-top:1px dashed #e2e8f0;margin-top:14px;padding-top:12px">
+        <h4 style="margin-bottom:10px">{{maintEditing?'修改记录':'新增记录'}}</h4>
+        <div class="form-row">
+          <div class="form-group"><label>类型</label><select v-model="maintForm.type"><option v-for="t in maintTypes" :value="t">{{t}}</option></select></div>
+          <div class="form-group"><label>日期</label><input type="date" v-model="maintForm.date"></div>
+          <div class="form-group"><label>下次到期</label><input type="date" v-model="maintForm.next_date"></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>费用</label><input type="number" v-model.number="maintForm.cost"></div>
+          <div class="form-group"><label>操作人</label><input v-model="maintForm.operator"></div>
+        </div>
+        <div class="form-group"><label>备注</label><input v-model="maintForm.note"></div>
+        <button class="btn primary" @click="saveMaint">保存记录</button>
+      </div>
+      <div class="modal-actions"><button class="btn" @click="maintShow=false">关闭</button></div>
+    </div>
+  </div>`,
+};
+function emptyEq() {
+  return { name: '', model: '', code: '', exp_type: '其它试验', sort_order: 0, status: '可用', open_fee: 0, power_fee: 0, depreciation_fee: 0, consumable_fee: 0, unit_price: 0, power_kw: 0, valid_from: '', valid_to: '', remark: '' };
+}
+function emptyMaint() {
+  return { type: '校准', date: '', next_date: '', cost: 0, operator: '', note: '' };
+}
+
+/* ---------------- 展板 ---------------- */
+const BoardsView = {
+  data: () => ({ boards: {} }),
+  methods: {
+    async load() { this.boards = await api('/api/dashboard/boards'); },
+    badge, fmtDT,
+  },
+  mounted() { this.load(); },
+  template: `
+  <div>
+    <div class="card"><h3>待试验展板</h3>
+      <table class="tbl"><thead><tr><th>编号</th><th>检测项目</th><th>产品型号</th><th>委托单位</th><th>委托人</th><th>计划开始</th><th>总用时</th><th>设备清单</th></tr></thead>
+      <tbody><tr v-for="o in boards.waiting" :key="o.id">
+        <td>{{o.experiment_no||o.order_no}}</td><td>{{o.test_item}}</td><td>{{o.sample_model}}</td><td>{{o.entrust_org}}</td><td>{{o.entruster}}</td>
+        <td>{{fmtDT(o.plan_start_min)}}</td><td>{{o.total_hours_sum||0}} h</td><td>{{o.equipment_list}}</td>
+      </tr><tr v-if="!boards.waiting||!boards.waiting.length"><td colspan="8" class="empty">暂无待试验</td></tr></tbody></table>
+    </div>
+    <div class="two-col">
+      <div class="card"><h3>设备使用明细</h3>
+        <table class="tbl"><thead><tr><th>设备</th><th>实验编号</th><th>样品</th><th>开始时间</th><th>预计结束</th></tr></thead>
+        <tbody><tr v-for="(u,i) in boards.usage" :key="i"><td>{{u.equipment_name}}</td><td>{{u.order_no}}</td><td>{{u.sample_no}}</td><td>{{fmtDT(u.actual_start)}}</td><td>{{fmtDT(u.plan_end)}}</td></tr>
+        <tr v-if="!boards.usage||!boards.usage.length"><td colspan="5" class="empty">暂无使用中设备</td></tr></tbody></table>
+      </div>
+      <div class="card"><h3>设备排期展板</h3>
+        <table class="tbl"><thead><tr><th>设备</th><th>实验编号</th><th>样品</th><th>计划开始</th><th>计划结束</th></tr></thead>
+        <tbody><tr v-for="(s,i) in boards.schedule_board" :key="i"><td>{{s.equipment_name}}</td><td>{{s.order_no}}</td><td>{{s.sample_no}}</td><td>{{fmtDT(s.plan_start)}}</td><td>{{fmtDT(s.plan_end)}}</td></tr>
+        <tr v-if="!boards.schedule_board||!boards.schedule_board.length"><td colspan="5" class="empty">暂无排期</td></tr></tbody></table>
+      </div>
+    </div>
+  </div>`,
+};
+
+/* ---------------- 交接班 ---------------- */
+const HandoverView = {
+  data: () => ({ list: [], orders: [], form: { order_id: null, note: '' } }),
+  methods: {
+    async load() { const [l, o] = await Promise.all([api('/api/dashboard/handover'), api('/api/orders?status=')]); this.list = l; this.orders = o; },
+    async submit() {
+      if (!this.form.note) { toast('请填写注意事项', 'error'); return; }
+      await api('/api/dashboard/handover', 'POST', this.form); this.form.note = ''; this.form.order_id = null; this.load(); toast('已记录', 'success');
+    },
+    fmtDT,
+  },
+  mounted() { this.load(); },
+  template: `
+  <div class="two-col">
+    <div class="card"><h3>新增交接记录</h3>
+      <div class="form-group"><label>关联委托单</label><select v-model="form.order_id"><option :value="null">不关联</option><option v-for="o in orders" :value="o.id">{{o.experiment_no||o.order_no}} {{o.test_item}}</option></select></div>
+      <div class="form-group"><label>注意事项</label><textarea v-model="form.note" rows="4"></textarea></div>
+      <button class="btn primary" @click="submit">保存</button>
+    </div>
+    <div class="card"><h3>日夜班交接记录</h3>
+      <table class="tbl"><thead><tr><th>时间</th><th>关联委托</th><th>记录人</th><th>注意事项</th></tr></thead>
+      <tbody><tr v-for="h in list" :key="h.id"><td>{{fmtDT(h.created_at)}}</td><td>{{h.order_no||'-'}}</td><td>{{h.operator}}</td><td>{{h.note}}</td></tr>
+      <tr v-if="!list.length"><td colspan="4" class="empty">暂无交接记录</td></tr></tbody></table>
+    </div>
+  </div>`,
+};
+
+/* ---------------- 用户管理 ---------------- */
+const UsersView = {
+  data: () => ({ list: [], showModal: false, editing: null, form: emptyUser() }),
+  methods: {
+    async load() { this.list = await api('/api/auth/users'); },
+    add() { this.editing = null; this.form = emptyUser(); this.showModal = true; },
+    edit(u) { this.editing = u; this.form = { username: u.username, name: u.name, role: u.role, department: u.department, email: u.email, phone: u.phone, password: '' }; this.showModal = true; },
+    async save() {
+      try {
+        if (this.editing) await api('/api/auth/users/' + this.editing.id, 'PUT', this.form);
+        else await api('/api/auth/users', 'POST', this.form);
+        this.showModal = false; this.load(); toast('保存成功', 'success');
+      } catch (e) { toast(e.message, 'error'); }
+    },
+    roleText,
+  },
+  mounted() { this.load(); },
+  template: `
+  <div class="card">
+    <div class="toolbar"><h3 style="flex:1">用户管理</h3><button class="btn primary" @click="add">添加用户</button></div>
+    <table class="tbl"><thead><tr><th>用户名</th><th>姓名</th><th>角色</th><th>部门</th><th>邮箱</th><th>电话</th><th>状态</th><th>操作</th></tr></thead>
+    <tbody><tr v-for="u in list" :key="u.id">
+      <td>{{u.username}}</td><td>{{u.name}}</td><td>{{roleText(u.role)}}</td><td>{{u.department}}</td><td>{{u.email}}</td><td>{{u.phone}}</td>
+      <td>{{u.is_active?'启用':'停用'}}</td><td><button class="btn link" @click="edit(u)">修改</button></td>
+    </tr></tbody></table>
+  </div>
+  <div class="modal-mask" v-if="showModal" @click.self="showModal=false">
+    <div class="modal" style="width:560px"><h3>{{editing?'修改用户':'添加用户'}}</h3>
+      <div class="form-row">
+        <div class="form-group"><label>用户名</label><input v-model="form.username" :disabled="!!editing"></div>
+        <div class="form-group"><label>姓名</label><input v-model="form.name"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>角色</label><select v-model="form.role"><option value="admin">管理员</option><option value="experimenter">实验员</option><option value="entruster">委托人</option></select></div>
+        <div class="form-group"><label>密码</label><input type="password" v-model="form.password" :placeholder="editing?'留空则不修改':'默认 123456'"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>部门</label><input v-model="form.department"></div>
+        <div class="form-group"><label>电话</label><input v-model="form.phone"></div>
+      </div>
+      <div class="form-group"><label>邮箱</label><input v-model="form.email"></div>
+      <div class="modal-actions"><button class="btn" @click="showModal=false">取消</button><button class="btn primary" @click="save">保存</button></div>
+    </div>
+  </div>`,
+};
+function emptyUser() { return { username: '', name: '', role: 'experimenter', department: '', email: '', phone: '', password: '' }; }
+
+/* ---------------- 统计图表 ---------------- */
+const StatisticsView = {
+  data: () => ({
+    overview: {}, trendLabels: [], trendLines: [], costByItem: [], costByMonth: [],
+    usage: [], workload: [], resultDist: [],
+    detail: { open: false, type: '', key: '', title: '', cols: [], rows: [] },
+  }),
+  methods: {
+    async load() {
+      try {
+        this.overview = await api('/api/statistics/overview');
+        const trend = await api('/api/statistics/trend?days=30');
+        this.trendLabels = trend.map(t => t.date); // 完整日期，供下钻查询
+        this.trendLines = [
+          { name: '委托', data: trend.map(t => t.created) },
+          { name: '完成', data: trend.map(t => t.finished) },
+        ];
+        const cost = await api('/api/statistics/cost');
+        this.costByItem = cost.by_item.map(c => ({ label: c.name, value: c.value }));
+        this.costByMonth = cost.by_month.map(c => ({ label: c.name, value: c.value }));
+        this.usage = (await api('/api/statistics/equipment-usage')).map(u => ({ label: u.name, value: u.hours }));
+        this.workload = (await api('/api/statistics/workload')).map(w => ({ label: w.name, value: w.orders }));
+        this.resultDist = (await api('/api/statistics/result-distribution')).map(d => ({ label: d.name, value: d.value }));
+      } catch (e) { toast(e.message, 'error'); }
+    },
+    async onChartClick(type, key) {
+      const meta = this.detailMeta(type, key);
+      if (!meta) return;
+      this.detail = { open: true, type, key, title: meta.title, cols: meta.cols, rows: [] };
+      try {
+        this.detail.rows = await api('/api/statistics/detail?type=' + encodeURIComponent(type) + '&key=' + encodeURIComponent(key));
+      } catch (e) { toast(e.message, 'error'); }
+    },
+    detailMeta(type, key) {
+      const ORD = [
+        { k: 'order_no', t: '委托编号' }, { k: 'experiment_no', t: '实验编号' },
+        { k: 'entrust_org', t: '委托单位' }, { k: 'sample_name', t: '样品' },
+        { k: 'test_item', t: '检测项目' }, { k: 'status', t: '状态' },
+        { k: 'total_cost', t: '费用' }, { k: 'created_at', t: '委托时间' }, { k: 'finish_at', t: '完成时间' },
+      ];
+      const map = {
+        trend: { title: key + ' 委托/完成明细', cols: ORD },
+        cost_item: { title: '检测项目「' + key + '」费用明细', cols: ORD },
+        cost_month: { title: key + ' 月度费用明细', cols: ORD },
+        workload: { title: '实验员「' + key + '」委托明细', cols: ORD },
+        equipment: { title: '设备「' + key + '」使用明细', cols: [
+          { k: 'sample_no', t: '样品编号' }, { k: 'equipment_name', t: '设备' },
+          { k: 'experiment_hours', t: '实验用时' }, { k: 'transition_hours', t: '过渡用时' },
+          { k: 'total_hours', t: '总用时' }, { k: 'status', t: '状态' },
+          { k: 'actual_start', t: '实际开始' }, { k: 'actual_end', t: '实际结束' },
+        ] },
+        result: { title: '实验结果「' + key + '」样品明细', cols: [
+          { k: 'sample_no', t: '样品编号' }, { k: 'status', t: '状态' },
+          { k: 'condition', t: '状况' }, { k: 'result', t: '结果' },
+          { k: 'remark', t: '备注' }, { k: 'created_at', t: '生成时间' },
+        ] },
+      };
+      return map[type] || null;
+    },
+    cellVal(row, k) {
+      const v = row[k];
+      if (v == null || v === '') return '-';
+      if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(v)) return fmtDT(v);
+      return v;
+    },
+    statusBadge(r) { return badge(r.status, this.detail.type === 'result' ? SAMPLE_STATUS : ORDER_STATUS); },
+    lineChart, barChart, donutChart,
+  },
+  mounted() {
+    window.__chartClick = (type, key) => this.onChartClick(type, key);
+    this.load();
+  },
+  beforeUnmount() { if (window.__chartClick) window.__chartClick = null; },
+  template: `
+  <div>
+    <p class="chart-hint">提示：点击图表中的柱子、数据点或扇区，可查看对应明细。</p>
+    <div class="grid-stats">
+      <div class="stat b"><div class="num">{{overview.total_orders||0}}</div><div class="label">委托单总数</div></div>
+      <div class="stat"><div class="num">{{overview.in_progress||0}}</div><div class="label">在途</div></div>
+      <div class="stat g"><div class="num">{{overview.finished||0}}</div><div class="label">已完成</div></div>
+      <div class="stat o"><div class="num">{{overview.total_cost||0}}</div><div class="label">费用总额(元)</div></div>
+      <div class="stat"><div class="num">{{overview.avg_cycle||0}}</div><div class="label">平均周期(天)</div></div>
+      <div class="stat"><div class="num">{{overview.total_equipment||0}}</div><div class="label">设备</div></div>
+    </div>
+    <div class="card"><h3>委托 / 完成趋势（近30天）</h3><div v-html="lineChart(trendLabels, trendLines, {ctype:'trend'})"></div></div>
+    <div class="two-col">
+      <div class="card"><h3>各检测项目费用</h3><div v-html="barChart(costByItem, {ctype:'cost_item'})"></div></div>
+      <div class="card"><h3>实验结果分布</h3><div v-html="donutChart(resultDist, {ctype:'result'})"></div></div>
+    </div>
+    <div class="two-col">
+      <div class="card"><h3>设备使用时长（小时）</h3><div v-html="barChart(usage, {ctype:'equipment'})"></div></div>
+      <div class="card"><h3>实验员委托量</h3><div v-html="barChart(workload, {ctype:'workload'})"></div></div>
+    </div>
+    <div class="card"><h3>月度费用</h3><div v-html="barChart(costByMonth, {ctype:'cost_month'})"></div></div>
+
+    <div class="modal-mask" v-if="detail.open" @click.self="detail.open=false">
+      <div class="modal" style="width:900px">
+        <h3>{{detail.title}}</h3>
+        <p class="chart-hint" v-if="detail.rows.length">共 {{detail.rows.length}} 条记录</p>
+        <table class="tbl"><thead><tr><th v-for="c in detail.cols" :key="c.k">{{c.t}}</th></tr></thead>
+        <tbody>
+          <tr v-for="(r,i) in detail.rows" :key="i">
+            <td v-for="c in detail.cols" :key="c.k">
+              <span v-if="c.k==='status'" v-html="statusBadge(r)"></span>
+              <span v-else-if="c.k==='result'" :class="{'c-ok': r.result==='OK', 'c-ng': r.result==='NG'}">{{r.result||'-'}}</span>
+              <span v-else>{{cellVal(r, c.k)}}</span>
+            </td>
+          </tr>
+          <tr v-if="!detail.rows.length"><td :colspan="detail.cols.length" class="empty">该维度暂无明细记录</td></tr>
+        </tbody></table>
+        <div class="modal-actions"><button class="btn" @click="detail.open=false">关闭</button></div>
+      </div>
+    </div>
+  </div>`,
+};
+
+/* ---------------- 审计日志 ---------------- */
+const AuditLogView = {
+  data: () => ({ list: [], total: 0, page: 1, size: 50, action: '', username: '', keyword: '' }),
+  methods: {
+    async load() {
+      const q = new URLSearchParams();
+      q.set('page', this.page); q.set('size', this.size);
+      if (this.action) q.set('action', this.action);
+      if (this.username) q.set('username', this.username);
+      if (this.keyword) q.set('keyword', this.keyword);
+      const r = await api('/api/audit?' + q.toString());
+      this.list = r.items; this.total = r.total;
+    },
+    async search() { this.page = 1; this.load(); },
+    async prev() { if (this.page > 1) { this.page--; this.load(); } },
+    async next() { if (this.page * this.size < this.total) { this.page++; this.load(); } },
+    fmtDT,
+  },
+  mounted() { this.load(); },
+  template: `
+  <div class="card">
+    <h3>审计日志</h3>
+    <div class="toolbar">
+      <input v-model="action" placeholder="操作（如：审核通过）">
+      <input v-model="username" placeholder="操作人">
+      <input v-model="keyword" placeholder="详情关键字">
+      <button class="btn primary" @click="search">查询</button>
+    </div>
+    <table class="tbl"><thead><tr><th>时间</th><th>操作人</th><th>操作</th><th>对象类型</th><th>对象</th><th>详情</th></tr></thead>
+    <tbody>
+      <tr v-for="a in list" :key="a.id">
+        <td>{{fmtDT(a.created_at)}}</td><td>{{a.username||'-'}}</td><td>{{a.action}}</td><td>{{a.target_type}}</td><td>{{a.target_id||'-'}}</td><td>{{a.detail}}</td>
+      </tr>
+      <tr v-if="!list.length"><td colspan="6" class="empty">暂无记录</td></tr>
+    </tbody></table>
+    <div class="pager">
+      <button class="btn sm" :disabled="page<=1" @click="prev">上一页</button>
+      <span>第 {{page}} 页 / 共 {{Math.ceil(total/size)}} 页（{{total}} 条）</span>
+      <button class="btn sm" :disabled="page*size>=total" @click="next">下一页</button>
+    </div>
+  </div>`,
+};
+
+/* ---------------- 客户档案 ---------------- */
+const CustomersView = {
+  data: () => ({ list: [], showModal: false, editing: null, form: emptyCustomer(), detail: null, orders: [], keyword: '' }),
+  methods: {
+    async load() { this.list = await api('/api/customers' + (this.keyword ? '?keyword=' + encodeURIComponent(this.keyword) : '')); },
+    add() { this.editing = null; this.form = emptyCustomer(); this.showModal = true; },
+    edit(c) { this.editing = c; this.form = { ...c }; this.showModal = true; },
+    async save() {
+      try {
+        if (this.editing) await api('/api/customers/' + this.editing.id, 'PUT', this.form);
+        else await api('/api/customers', 'POST', this.form);
+        this.showModal = false; this.load(); toast('保存成功', 'success');
+      } catch (e) { toast(e.message, 'error'); }
+    },
+    async del(c) { if (confirm('确认删除客户 ' + c.name + '？')) { await api('/api/customers/' + c.id, 'DELETE'); this.load(); } },
+    async view(c) { this.detail = c; this.orders = await api('/api/customers/' + c.id + '/orders'); },
+    isAdmin() { return state.role === 'admin'; },
+    badge, fmtD,
+  },
+  mounted() { this.load(); },
+  template: `
+  <div>
+    <div class="card">
+      <div class="toolbar"><h3 style="flex:1">客户 / 委托单位档案</h3>
+        <input v-model="keyword" placeholder="名称/联系人/电话" @keyup.enter="load"><button class="btn primary" @click="load">查询</button>
+        <button class="btn primary" @click="add" v-if="isAdmin()">添加客户</button></div>
+      <table class="tbl"><thead><tr><th>委托单位</th><th>联系人</th><th>电话</th><th>邮箱</th><th>地址</th><th>操作</th></tr></thead>
+      <tbody><tr v-for="c in list" :key="c.id">
+        <td>{{c.name}}</td><td>{{c.contact}}</td><td>{{c.phone}}</td><td>{{c.email}}</td><td>{{c.address}}</td>
+        <td>
+          <button class="btn link" @click="view(c)">历史委托</button>
+          <button class="btn link" v-if="isAdmin()" @click="edit(c)">修改</button>
+          <button class="btn link" v-if="isAdmin()" @click="del(c)">删除</button>
+        </td>
+      </tr></tbody></table>
+    </div>
+    <div class="modal-mask" v-if="detail" @click.self="detail=null">
+      <div class="modal" style="width:760px">
+        <h3>{{detail.name}} —— 历史委托</h3>
+        <table class="tbl"><thead><tr><th>委托编号</th><th>实验编号</th><th>样品</th><th>检测项目</th><th>状态</th><th>委托时间</th></tr></thead>
+        <tbody><tr v-for="o in orders" :key="o.id">
+          <td>{{o.order_no}}</td><td>{{o.experiment_no||'-'}}</td><td>{{o.sample_name}}</td><td>{{o.test_item}}</td>
+          <td v-html="badge(o.status)"></td><td>{{fmtD(o.created_at)}}</td>
+        </tr><tr v-if="!orders.length"><td colspan="6" class="empty">暂无委托</td></tr></tbody></table>
+        <div class="modal-actions"><button class="btn" @click="detail=null">关闭</button></div>
+      </div>
+    </div>
+    <div class="modal-mask" v-if="showModal" @click.self="showModal=false">
+      <div class="modal" style="width:560px"><h3>{{editing?'修改客户':'添加客户'}}</h3>
+        <div class="form-row">
+          <div class="form-group"><label>委托单位名称</label><input v-model="form.name"></div>
+          <div class="form-group"><label>联系人</label><input v-model="form.contact"></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>电话</label><input v-model="form.phone"></div>
+          <div class="form-group"><label>邮箱</label><input v-model="form.email"></div>
+        </div>
+        <div class="form-group"><label>地址</label><input v-model="form.address"></div>
+        <div class="form-group"><label>备注</label><textarea v-model="form.remark"></textarea></div>
+        <div class="modal-actions"><button class="btn" @click="showModal=false">取消</button><button class="btn primary" @click="save">保存</button></div>
+      </div>
+    </div>
+  </div>`,
+};
+function emptyCustomer() { return { name: '', contact: '', phone: '', email: '', address: '', remark: '' }; }
+
+/* ---------------- 根组件 ---------------- */
+const RootApp = {
+  components: {
+    LoginPage, PublicPage, MainLayout, Dashboard, OrderNew, OrderQuery, ReviewView,
+    SamplesView, ScheduleView, ExperimentView, ReportsView, EquipmentView, BoardsView, HandoverView, UsersView,
+    StatisticsView, AuditLogView, CustomersView,
+  },
+  data: () => ({ allEq: [], reviewId: null }),
+  computed: {
+    isProtected() { return !['/orders/new', '/orders/query'].includes(state.route); },
+  },
+  methods: {
+    async loadEq() { try { this.allEq = await api('/api/equipment'); } catch (e) {} },
+    roleText,
+  },
+  mounted() { this.loadEq(); },
+  template: `
+  <div>
+    <login-page v-if="!state.token && isProtected"></login-page>
+    <public-page v-else-if="!state.token"></public-page>
+    <main-layout v-else></main-layout>
+    <div class="toast" :class="state.toast.type" v-if="state.toast.msg">{{state.toast.msg}}</div>
+  </div>`,
+};
+
+/* ---------------- 路由 ---------------- */
+const routes = ['/dashboard', '/orders/new', '/orders/query', '/review', '/samples', '/schedule', '/experiment', '/reports', '/equipment', '/boards', '/handover', '/statistics', '/customers', '/audit', '/users'];
+function applyRoute() {
+  const h = location.hash.slice(1);
+  const home = homeRoute(state.role);
+  const allowed = ROLE_ROUTES[state.role] || [];
+  let target = (h && routes.includes(h)) ? h : home;
+  if (!allowed.includes(target)) target = home;
+  state.route = target;
+}
+window.addEventListener('hashchange', applyRoute);
+applyRoute();
+
+/* 供组件内使用全局 helper */
+const app = createApp(RootApp);
+
+// 全局注册所有组件（否则 MainLayout / PublicPage 模板里的 <dashboard> 等标签解析不到）
+const _components = {
+  'login-page': LoginPage, 'public-page': PublicPage, 'main-layout': MainLayout,
+  'dashboard': Dashboard, 'order-new': OrderNew, 'order-query': OrderQuery,
+  'review-view': ReviewView, 'samples-view': SamplesView, 'schedule-view': ScheduleView,
+  'experiment-view': ExperimentView, 'reports-view': ReportsView, 'equipment-view': EquipmentView,
+  'boards-view': BoardsView, 'handover-view': HandoverView, 'users-view': UsersView,
+  'statistics-view': StatisticsView, 'customers-view': CustomersView, 'audit-view': AuditLogView,
+};
+Object.entries(_components).forEach(([name, comp]) => app.component(name, comp));
+
+app.config.globalProperties.state = state;
+app.config.globalProperties.navigate = navigate;
+app.config.globalProperties.fmtD = fmtD;
+app.config.globalProperties.fmtDT = fmtDT;
+app.config.globalProperties.roleText = roleText;
+app.mount('#app');
