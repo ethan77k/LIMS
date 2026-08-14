@@ -40,3 +40,6 @@ Thumbs.db
 # 临时提取文件
 _eq_data.json
 _eq_seed_snippet.py
+
+# 运行日志
+*.log

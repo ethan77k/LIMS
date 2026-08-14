@@ -303,25 +303,26 @@ const Dashboard = {
 
 /* ---------------- 委托申请 ---------------- */
 const OrderNew = {
-  data: () => ({ form: emptyOrder(), result: null, customers: [] }),
+  data: () => ({ form: emptyOrder(), result: null }),
   methods: {
-    async loadCustomers() { try { this.customers = await api('/api/customers'); } catch (e) {} },
-    onCustomerPick() {
-      const c = this.customers.find(x => x.name === this.form.entrust_org);
-      if (c) { if (!this.form.phone && c.phone) this.form.phone = c.phone; if (!this.form.email && c.email) this.form.email = c.email; }
-    },
     async submit() {
-      if (!this.form.entruster || !this.form.sample_name || !this.form.test_item) {
-        toast('请填写委托人、样品名称、检测项目', 'error'); return;
+      if (!this.form.entrust_org || !this.form.entruster || !this.form.sample_name || !this.form.sample_model || !this.form.test_item || !this.form.test_stage || !this.form.sample_count || !this.form.sample_unit || !this.form.phone || !this.form.email || !this.form.sample_dispose) {
+        toast('请填写所有必填项（委托单位/委托人/样品名称/DHD型号/检测项目/测试阶段/数量/单位/联系电话/DHD邮箱/样品处理）', 'error'); return;
       }
       try {
-        const r = await api('/api/orders', 'POST', this.form);
+        const payload = { ...this.form, required_start: this.form.required_start || null };
+        const r = await api('/api/orders', 'POST', payload);
         this.result = r; toast('提交成功', 'success');
       } catch (e) { toast(e.message, 'error'); }
     },
     reset() { this.form = emptyOrder(); this.result = null; },
   },
-  mounted() { this.loadCustomers(); },
+  mounted() {
+    // 登录的委托人：自动带出本人姓名，确保委托单与账号绑定
+    if (state.token && state.role === 'entruster' && !this.form.entruster) {
+      this.form.entruster = state.name;
+    }
+  },
   template: `
   <div class="card">
     <h3>实验委托申请 <span style="font-size:12px;color:#c62828">（红色标记为必填项）</span></h3>
@@ -329,7 +330,7 @@ const OrderNew = {
       委托申请提交成功！委托单编号：<b>{{result.order_no}}</b>
     </div>
     <div class="form-row">
-      <div class="form-group"><label><span class="req">*</span>委托单位</label><input v-model="form.entrust_org" list="customer-list" @change="onCustomerPick"></div>
+      <div class="form-group"><label><span class="req">*</span>委托单位</label><select v-model="form.entrust_org"><option>音频研发中心</option><option>创新事业部</option><option>国内事业部</option><option>高端事业部</option><option>营销中心</option><option>供应链中心</option><option>工程质量中心</option></select></div>
       <div class="form-group"><label>委托单位(英文)</label><input v-model="form.entrust_org_en"></div>
       <div class="form-group"><label><span class="req">*</span>委托人</label><input v-model="form.entruster"></div>
       <div class="form-group"><label>委托人(英文)</label><input v-model="form.entruster_en"></div>
@@ -337,32 +338,33 @@ const OrderNew = {
     <div class="form-row">
       <div class="form-group"><label><span class="req">*</span>样品名称</label><input v-model="form.sample_name"></div>
       <div class="form-group"><label>样品名称(英文)</label><input v-model="form.sample_name_en"></div>
-      <div class="form-group"><label>样品型号</label><input v-model="form.sample_model"></div>
+      <div class="form-group"><label><span class="req">*</span>DHD型号</label><input v-model="form.sample_model"></div>
       <div class="form-group"><label>客户型号</label><input v-model="form.customer_model"></div>
     </div>
     <div class="form-row">
       <div class="form-group"><label><span class="req">*</span>检测项目</label><input v-model="form.test_item"></div>
       <div class="form-group"><label>检测项目(英文)</label><input v-model="form.test_item_en"></div>
-      <div class="form-group" style="flex:0 0 100px"><label><span class="req">*</span>数量</label><input type="number" v-model.number="form.sample_count"></div>
-      <div class="form-group" style="flex:0 0 90px"><label>单位</label><input v-model="form.sample_unit"></div>
+      <div class="form-group" style="flex:0 0 130px"><label><span class="req">*</span>测试阶段</label><select v-model="form.test_stage"><option>EVT</option><option>DVT</option><option>DVT-2</option><option>DVT-3</option><option>PVT</option><option>PVT-2</option><option>PVT-3</option><option>MP</option><option>二供</option><option>三供</option><option>四供</option><option>五供</option></select></div>
+      <div class="form-group" style="flex:0 0 90px"><label><span class="req">*</span>数量</label><input type="number" v-model.number="form.sample_count"></div>
+      <div class="form-group" style="flex:0 0 80px"><label><span class="req">*</span>单位</label><input v-model="form.sample_unit"></div>
     </div>
     <div class="form-row">
       <div class="form-group"><label>检测依据</label><input v-model="form.test_basis" placeholder="没有则填客户自定义条件"></div>
       <div class="form-group"><label>检测依据(英文)</label><input v-model="form.test_basis_en"></div>
-      <div class="form-group"><label>试验原因</label><select v-model="form.test_reason"><option>例行试验</option><option>型式试验</option><option>委托试验</option></select></div>
+      <div class="form-group"><label>试验原因</label><select v-model="form.test_reason"><option>例行试验</option><option>临时试验</option><option>委托试验</option></select></div>
       <div class="form-group"><label>报告要求</label><select v-model="form.report_lang"><option>中文</option><option>英文</option><option>中英双语</option></select></div>
     </div>
     <div class="form-row">
       <div class="form-group"><label><span class="req">*</span>联系电话</label><input v-model="form.phone"></div>
-      <div class="form-group"><label><span class="req">*</span>内网邮箱</label><input v-model="form.email"></div>
+      <div class="form-group"><label><span class="req">*</span>DHD邮箱</label><input v-model="form.email"></div>
       <div class="form-group"><label>跟踪人</label><input v-model="form.tracker"></div>
       <div class="form-group"><label>跟踪人邮箱</label><input v-model="form.tracker_email" placeholder="多个用逗号/分号分隔"></div>
     </div>
     <div class="form-row">
       <div class="form-group"><label>样品状态</label><input v-model="form.sample_status"></div>
       <div class="form-group"><label>存放要求</label><input v-model="form.storage_require"></div>
-      <div class="form-group"><label>样品处理</label><select v-model="form.sample_dispose"><option>退还</option><option>报废</option><option>留存</option></select></div>
-      <div class="form-group"><label>要求开始时间</label><input type="datetime-local" v-model="form.required_start"></div>
+      <div class="form-group"><label><span class="req">*</span>样品处理</label><select v-model="form.sample_dispose"><option>退还</option><option>报废</option><option>留存</option></select></div>
+      <div class="form-group"><label>要求完成时间</label><input type="datetime-local" v-model="form.required_start"></div>
     </div>
     <div class="form-group"><label>试验条件</label><textarea v-model="form.test_condition"></textarea></div>
     <div class="form-group"><label>备注</label><textarea v-model="form.remark"></textarea></div>
@@ -370,14 +372,13 @@ const OrderNew = {
       <button class="btn primary" @click="submit">提交申请</button>
       <button class="btn" style="margin-left:10px" @click="reset">重置</button>
     </div>
-    <datalist id="customer-list"><option v-for="c in customers" :key="c.id" :value="c.name">{{c.contact}}</option></datalist>
   </div>`,
 };
 function emptyOrder() {
   return {
     entrust_org: '', entrust_org_en: '', entruster: '', entruster_en: '',
     sample_name: '', sample_name_en: '', test_item: '', test_item_en: '', test_basis: '', test_basis_en: '',
-    sample_model: '', customer_model: '', sample_count: 1, sample_unit: '只',
+    test_stage: '', sample_model: '', customer_model: '', sample_count: '', sample_unit: '',
     phone: '', email: '', tracker: '', tracker_email: '', test_reason: '例行试验', report_lang: '中文',
     sample_status: '样品正常', storage_require: '常温存放', sample_dispose: '退还',
     test_condition: '', remark: '', required_start: '',
@@ -401,7 +402,7 @@ const OrderQuery = {
     },
     badge, fmtDT,
   },
-  mounted() { if (state.token && state.role !== 'entruster') this.search(); },
+  mounted() { if (state.token) this.search(); },
   template: `
   <div class="card">
     <h3>实验委托查询</h3>
@@ -410,13 +411,13 @@ const OrderQuery = {
         <input v-model="order_no" placeholder="委托单编号"><input v-model="phone" placeholder="联系电话">
         <button class="btn primary" @click="search">查询</button>
       </div>
-      <table class="tbl"><thead><tr><th>编号</th><th>委托单位</th><th>委托人</th><th>样品名称</th><th>检测项目</th><th>状态</th><th>委托时间</th></tr></thead>
+      <table class="tbl"><thead><tr><th>编号</th><th>委托单位</th><th>委托人</th><th>样品名称</th><th>检测项目</th><th>状态</th><th>备注</th><th>委托时间</th></tr></thead>
       <tbody>
         <tr v-for="o in list" :key="o.id">
           <td>{{o.order_no}}</td><td>{{o.entrust_org}}</td><td>{{o.entruster}}</td><td>{{o.sample_name}}</td>
-          <td>{{o.test_item}}</td><td v-html="badge(o.status)"></td><td>{{fmtD(o.created_at)}}</td>
+          <td>{{o.test_item}}</td><td v-html="badge(o.status)"></td><td>{{ o.status === '已否决' ? o.reject_reason : '' }}</td><td>{{fmtD(o.created_at)}}</td>
         </tr>
-        <tr v-if="!list.length"><td colspan="7" class="empty">输入条件后查询</td></tr>
+        <tr v-if="!list.length"><td colspan="8" class="empty">输入条件后查询</td></tr>
       </tbody></table>
     </div>
     <div v-else>
@@ -425,13 +426,13 @@ const OrderQuery = {
           <option v-for="s in ['待审核','已审核','已排期','实验中','已完成','已否决']" :key="s" :value="s">{{s}}</option></select>
         <input v-model="keyword" placeholder="编号/委托人/单位/型号/样品名"><button class="btn primary" @click="search">查询</button>
       </div>
-      <table class="tbl"><thead><tr><th>委托编号</th><th>实验编号</th><th>委托单位</th><th>委托人</th><th>样品</th><th>检测项目</th><th>状态</th><th>委托时间</th></tr></thead>
+      <table class="tbl"><thead><tr><th>委托编号</th><th>实验编号</th><th>委托单位</th><th>委托人</th><th>样品</th><th>检测项目</th><th>状态</th><th>备注</th><th>委托时间</th></tr></thead>
       <tbody>
         <tr v-for="o in all" :key="o.id">
           <td>{{o.order_no}}</td><td>{{o.experiment_no||'-'}}</td><td>{{o.entrust_org}}</td><td>{{o.entruster}}</td>
-          <td>{{o.sample_name}} ×{{o.sample_count}}</td><td>{{o.test_item}}</td><td v-html="badge(o.status)"></td><td>{{fmtD(o.created_at)}}</td>
+          <td>{{o.sample_name}} ×{{o.sample_count}}</td><td>{{o.test_item}}</td><td v-html="badge(o.status)"></td><td>{{ o.status === '已否决' ? o.reject_reason : '' }}</td><td>{{fmtD(o.created_at)}}</td>
         </tr>
-        <tr v-if="!all.length"><td colspan="8" class="empty">暂无数据</td></tr>
+        <tr v-if="!all.length"><td colspan="9" class="empty">暂无数据</td></tr>
       </tbody></table>
     </div>
   </div>`,
@@ -463,8 +464,11 @@ const ReviewView = {
       } catch (e) { toast(e.message, 'error'); }
     },
     async reject() {
+      if (!this.rejectReason || !this.rejectReason.trim()) {
+        toast('请填写否决原因后再否决', 'error'); return;
+      }
       try {
-        await api('/api/review/' + this.current.id, 'POST', { approve: false, reject_reason: this.rejectReason });
+        await api('/api/review/' + this.current.id, 'POST', { approve: false, reject_reason: this.rejectReason.trim() });
         toast('已否决', 'success'); this.showModal = false; this.load();
       } catch (e) { toast(e.message, 'error'); }
     },
@@ -518,7 +522,7 @@ const ReviewView = {
         <div class="form-group" style="margin-top:14px"><label>否决原因（否决时填写）</label><textarea v-model="rejectReason"></textarea></div>
       </div>
       <div class="modal-actions">
-        <button class="btn danger" @click="reject">否决</button>
+        <button class="btn danger" :disabled="!rejectReason || !rejectReason.trim()" @click="reject">否决</button>
         <button class="btn" @click="showModal=false">取消</button>
         <button class="btn success" @click="approve">通过</button>
       </div>

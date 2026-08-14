@@ -54,6 +54,7 @@ class EntrustOrder(Base):
     test_basis_en: Mapped[str] = mapped_column(String(256), default="")
 
     # —— 样品信息 ——
+    test_stage: Mapped[str] = mapped_column(String(32), default="")        # 测试阶段
     sample_model: Mapped[str] = mapped_column(String(128), default="")     # 样品型号
     customer_model: Mapped[str] = mapped_column(String(128), default="")   # 客户型号
     sample_count: Mapped[int] = mapped_column(Integer, default=1)          # 样品数量

@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from ..audit import log
 from ..database import get_db
-from ..deps import require_roles
+from ..deps import get_current_user_optional, require_roles
 from ..models import EntrustOrder, User
 from ..notify import notify
 from ..numbering import next_order_no
@@ -26,8 +26,16 @@ def _get_order(db: Session, order_id: int) -> EntrustOrder:
 
 
 @router.post("")
-def create_order(data: OrderCreate, db: Session = Depends(get_db)):
-    order = EntrustOrder(**data.model_dump(), order_no=next_order_no(db))
+def create_order(
+    data: OrderCreate,
+    db: Session = Depends(get_db),
+    user: User | None = Depends(get_current_user_optional),
+):
+    values = data.model_dump()
+    # 登录的委托人提交时，绑定到当前账号（委托人姓名强制取账号姓名，避免填错对不上）
+    if user is not None and user.role == "entruster":
+        values["entruster"] = user.name
+    order = EntrustOrder(**values, order_no=next_order_no(db))
     db.add(order)
     db.flush()
     log(db, None, "委托申请", "order", order.id, f"{order.order_no} {order.sample_name}")
@@ -41,11 +49,14 @@ def create_order(data: OrderCreate, db: Session = Depends(get_db)):
 @router.get("")
 def list_orders(
     db: Session = Depends(get_db),
-    _: User = Depends(require_roles("admin", "experimenter")),
+    user: User = Depends(require_roles("admin", "experimenter", "entruster")),
     status: str | None = Query(None),
     keyword: str | None = Query(None),
 ):
     q = db.query(EntrustOrder)
+    # 委托人只能看到自己名下（委托人姓名匹配）的委托单
+    if user.role == "entruster":
+        q = q.filter(EntrustOrder.entruster == user.name)
     if status:
         q = q.filter(EntrustOrder.status == status)
     if keyword:

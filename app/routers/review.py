@@ -38,6 +38,8 @@ def review_order(
 
     # 否决
     if not data.approve:
+        if not (data.reject_reason or "").strip():
+            raise HTTPException(400, "否决时必须填写否决原因")
         order.status = "已否决"
         order.reject_reason = data.reject_reason
         order.reviewer_id = reviewer.id

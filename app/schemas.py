@@ -70,6 +70,7 @@ class OrderCreate(BaseModel):
     test_item_en: str = ""
     test_basis: str = ""
     test_basis_en: str = ""
+    test_stage: str = ""
     sample_model: str = ""
     customer_model: str = ""
     sample_count: int = 1
@@ -100,6 +101,7 @@ class OrderUpdate(BaseModel):
     test_item_en: str | None = None
     test_basis: str | None = None
     test_basis_en: str | None = None
+    test_stage: str | None = None
     sample_model: str | None = None
     customer_model: str | None = None
     sample_count: int | None = None
@@ -179,6 +181,7 @@ class OrderOut(BaseModel):
     test_item_en: str
     test_basis: str
     test_basis_en: str
+    test_stage: str
     sample_model: str
     customer_model: str
     sample_count: int

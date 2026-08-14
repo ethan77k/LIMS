@@ -52,6 +52,7 @@ def order_to_dict(o, with_detail=True) -> dict:
         "sample_name": o.sample_name, "sample_name_en": o.sample_name_en,
         "test_item": o.test_item, "test_item_en": o.test_item_en,
         "test_basis": o.test_basis, "test_basis_en": o.test_basis_en,
+        "test_stage": o.test_stage,
         "sample_model": o.sample_model, "customer_model": o.customer_model,
         "sample_count": o.sample_count, "sample_unit": o.sample_unit,
         "phone": o.phone, "email": o.email, "tracker": o.tracker, "tracker_email": o.tracker_email,
