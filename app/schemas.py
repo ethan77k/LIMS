@@ -235,6 +235,12 @@ class SampleOperationRequest(BaseModel):
     remark: str = ""
 
 
+class SampleCreateRequest(BaseModel):
+    """新增样品（补样 / 复用留存样品）。"""
+    order_id: int
+    source_sample_id: int | None = None  # 复用留存样品时传入
+
+
 # ---------------------------------------------------------------------------
 # 排期
 # ---------------------------------------------------------------------------

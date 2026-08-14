@@ -1,12 +1,13 @@
-"""样品管理：接收、退还/报废/留存、操作明细。"""
+"""样品管理：接收、退还/报废/留存、操作明细、新增样品（补样/复用留存）。"""
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from ..audit import log
 from ..database import get_db
 from ..deps import require_roles
-from ..models import Sample, SampleOperation, User
-from ..schemas import SampleDisposeRequest, SampleOperationRequest, SampleReceiveRequest
+from ..models import EntrustOrder, Sample, SampleOperation, User
+from ..numbering import next_sample_no
+from ..schemas import SampleCreateRequest, SampleDisposeRequest, SampleOperationRequest, SampleReceiveRequest
 from ..serializers import sample_to_dict
 
 router = APIRouter(prefix="/api/samples", tags=["samples"])
@@ -26,13 +27,53 @@ def _log(db: Session, sample: Sample, action: str, operator: str, remark: str = 
 @router.get("")
 def list_samples(
     order_id: int | None = Query(None),
+    status: str | None = Query(None),
     db: Session = Depends(get_db),
     _: User = Depends(require_roles("admin", "experimenter")),
 ):
     q = db.query(Sample)
     if order_id:
         q = q.filter(Sample.order_id == order_id)
+    if status:
+        q = q.filter(Sample.status == status)
     return [sample_to_dict(s) for s in q.order_by(Sample.id).all()]
+
+
+@router.post("")
+def create_sample(
+    data: SampleCreateRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles("admin", "experimenter")),
+):
+    order = db.get(EntrustOrder, data.order_id)
+    if order is None:
+        raise HTTPException(404, "委托单不存在")
+    if not order.experiment_no:
+        raise HTTPException(400, "委托单尚未审核，无法新增样品")
+
+    remark = "手动新增样品"
+    condition = "未检查"
+    if data.source_sample_id is not None:
+        src = db.get(Sample, data.source_sample_id)
+        if src is None:
+            raise HTTPException(404, "留存样品不存在")
+        if src.status != "已留存":
+            raise HTTPException(400, "仅「已留存」样品可复用")
+        remark = f"复用留存样品 {src.sample_no}"
+        condition = src.condition or "未检查"
+
+    count = db.query(Sample).filter(Sample.order_id == order.id).count()
+    sample = Sample(
+        order_id=order.id, sample_no=next_sample_no(db, order.experiment_no, count),
+        status="待接收", condition=condition, remark=remark,
+    )
+    db.add(sample)
+    db.flush()
+    _log(db, sample, "生成", user.name, remark)
+    log(db, user, "新增样品", "sample", sample.id, sample.sample_no)
+    db.commit()
+    db.refresh(sample)
+    return sample_to_dict(sample)
 
 
 @router.get("/{sample_id}")

@@ -387,7 +387,7 @@ function emptyOrder() {
 
 /* ---------------- 委托查询 ---------------- */
 const OrderQuery = {
-  data: () => ({ order_no: '', phone: '', list: [], status: '', keyword: '', all: [] }),
+  data: () => ({ order_no: '', phone: '', list: [], status: '', keyword: '', all: [], showEdit: false, edit: null, editForm: {} }),
   methods: {
     async search() {
       if (!state.token) {
@@ -399,6 +399,44 @@ const OrderQuery = {
       if (this.status) q.set('status', this.status);
       if (this.keyword) q.set('keyword', this.keyword);
       this.all = await api('/api/orders?' + q.toString());
+    },
+    canEdit(o) {
+      if (o.status !== '待审核') return false;
+      if (state.role === 'entruster' && o.entruster !== state.name) return false;
+      return true;
+    },
+    openEdit(o) {
+      this.edit = o;
+      this.editForm = {
+        entrust_org: o.entrust_org, entrust_org_en: o.entrust_org_en,
+        entruster: o.entruster, entruster_en: o.entruster_en,
+        sample_name: o.sample_name, sample_name_en: o.sample_name_en,
+        test_item: o.test_item, test_item_en: o.test_item_en,
+        test_basis: o.test_basis, test_basis_en: o.test_basis_en,
+        test_stage: o.test_stage, sample_model: o.sample_model, customer_model: o.customer_model,
+        sample_count: o.sample_count, sample_unit: o.sample_unit,
+        phone: o.phone, email: o.email, tracker: o.tracker, tracker_email: o.tracker_email,
+        test_reason: o.test_reason, report_lang: o.report_lang,
+        sample_status: o.sample_status, storage_require: o.storage_require,
+        sample_dispose: o.sample_dispose, test_condition: o.test_condition, remark: o.remark,
+        required_start: o.required_start ? String(o.required_start).slice(0, 16) : '',
+      };
+      this.showEdit = true;
+    },
+    async saveEdit() {
+      try {
+        if (!this.editForm.sample_count || Number(this.editForm.sample_count) < 1) { toast('样品数量至少为 1', 'error'); return; }
+        const payload = { ...this.editForm, required_start: this.editForm.required_start || null };
+        await api('/api/orders/' + this.edit.id, 'PUT', payload);
+        toast('修改成功', 'success'); this.showEdit = false; this.search();
+      } catch (e) { toast(e.message, 'error'); }
+    },
+    async remove(o) {
+      if (!confirm(`确认删除委托单 ${o.order_no}？删除后不可恢复。`)) return;
+      try {
+        await api('/api/orders/' + o.id, 'DELETE');
+        toast('已删除', 'success'); this.search();
+      } catch (e) { toast(e.message, 'error'); }
     },
     badge, fmtDT,
   },
@@ -426,14 +464,53 @@ const OrderQuery = {
           <option v-for="s in ['待审核','已审核','已排期','实验中','已完成','已否决']" :key="s" :value="s">{{s}}</option></select>
         <input v-model="keyword" placeholder="编号/委托人/单位/型号/样品名"><button class="btn primary" @click="search">查询</button>
       </div>
-      <table class="tbl"><thead><tr><th>委托编号</th><th>实验编号</th><th>委托单位</th><th>委托人</th><th>样品</th><th>检测项目</th><th>状态</th><th>备注</th><th>委托时间</th></tr></thead>
+      <table class="tbl"><thead><tr><th>委托编号</th><th>实验编号</th><th>委托单位</th><th>委托人</th><th>样品</th><th>检测项目</th><th>状态</th><th>备注</th><th>委托时间</th><th>操作</th></tr></thead>
       <tbody>
         <tr v-for="o in all" :key="o.id">
           <td>{{o.order_no}}</td><td>{{o.experiment_no||'-'}}</td><td>{{o.entrust_org}}</td><td>{{o.entruster}}</td>
           <td>{{o.sample_name}} ×{{o.sample_count}}</td><td>{{o.test_item}}</td><td v-html="badge(o.status)"></td><td>{{ o.status === '已否决' ? o.reject_reason : '' }}</td><td>{{fmtD(o.created_at)}}</td>
+          <td>
+            <button class="btn sm" v-if="canEdit(o)" @click="openEdit(o)">修改</button>
+            <button class="btn danger sm" v-if="canEdit(o)" @click="remove(o)">删除</button>
+          </td>
         </tr>
-        <tr v-if="!all.length"><td colspan="9" class="empty">暂无数据</td></tr>
+        <tr v-if="!all.length"><td colspan="10" class="empty">暂无数据</td></tr>
       </tbody></table>
+    </div>
+  </div>
+  <div class="modal-mask" v-if="showEdit" @click.self="showEdit=false">
+    <div class="modal" style="width:860px">
+      <h3>修改委托单 —— {{edit.order_no}}</h3>
+      <div class="form-row">
+        <div class="form-group"><label><span class="req">*</span>委托单位</label><select v-model="editForm.entrust_org"><option>音频研发中心</option><option>创新事业部</option><option>国内事业部</option><option>高端事业部</option><option>营销中心</option><option>供应链中心</option><option>工程质量中心</option></select></div>
+        <div class="form-group"><label>委托人</label><input v-model="editForm.entruster"></div>
+        <div class="form-group"><label><span class="req">*</span>样品名称</label><input v-model="editForm.sample_name"></div>
+        <div class="form-group"><label><span class="req">*</span>DHD型号</label><input v-model="editForm.sample_model"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label><span class="req">*</span>检测项目</label><input v-model="editForm.test_item"></div>
+        <div class="form-group" style="flex:0 0 130px"><label><span class="req">*</span>测试阶段</label><select v-model="editForm.test_stage"><option>EVT</option><option>DVT</option><option>DVT-2</option><option>DVT-3</option><option>PVT</option><option>PVT-2</option><option>PVT-3</option><option>MP</option><option>二供</option><option>三供</option><option>四供</option><option>五供</option></select></div>
+        <div class="form-group" style="flex:0 0 80px"><label><span class="req">*</span>数量</label><input type="number" v-model.number="editForm.sample_count"></div>
+        <div class="form-group" style="flex:0 0 80px"><label><span class="req">*</span>单位</label><input v-model="editForm.sample_unit"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label><span class="req">*</span>联系电话</label><input v-model="editForm.phone"></div>
+        <div class="form-group"><label><span class="req">*</span>邮箱</label><input v-model="editForm.email"></div>
+        <div class="form-group"><label>跟踪人</label><input v-model="editForm.tracker"></div>
+        <div class="form-group"><label>样品处理</label><select v-model="editForm.sample_dispose"><option>退还</option><option>报废</option><option>留存</option></select></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>样品状态</label><input v-model="editForm.sample_status"></div>
+        <div class="form-group"><label>存放要求</label><input v-model="editForm.storage_require"></div>
+        <div class="form-group"><label>检测依据</label><input v-model="editForm.test_basis"></div>
+        <div class="form-group"><label>要求完成时间</label><input type="datetime-local" v-model="editForm.required_start"></div>
+      </div>
+      <div class="form-group"><label>试验条件</label><textarea v-model="editForm.test_condition"></textarea></div>
+      <div class="form-group"><label>备注</label><textarea v-model="editForm.remark"></textarea></div>
+      <div class="modal-actions">
+        <button class="btn" @click="showEdit=false">取消</button>
+        <button class="btn primary" @click="saveEdit">保存修改</button>
+      </div>
     </div>
   </div>`,
 };
@@ -530,9 +607,71 @@ const ReviewView = {
   </div>`,
 };
 
+/* ---------------- 样品标签/领出单（Code39 离线自绘） ---------------- */
+const CODE39_TABLE = {
+  '0': 'nnnwwnwnn', '1': 'wnnwnnnnw', '2': 'nnwwnnnnw', '3': 'wnwwnnnnn', '4': 'nnnwwnnnw',
+  '5': 'wnnwwnnnn', '6': 'nnwwwnnnn', '7': 'nnnwnnwnw', '8': 'wnnwnnwnn', '9': 'nnwwnnwnn',
+  'A': 'wnnnnwnnw', 'B': 'nnwnnwnnw', 'C': 'wnwnnwnnn', 'D': 'nnnnwwnnw', 'E': 'wnnnwwnnn',
+  'F': 'nnwnwwnnn', 'G': 'nnnnnwwnw', 'H': 'wnnnnwwnn', 'I': 'nnwnnwwnn', 'J': 'nnnnwwwnn',
+  'K': 'wnnnnnnww', 'L': 'nnwnnnnww', 'M': 'wnwnnnnwn', 'N': 'nnnnwnnww', 'O': 'wnnnwnnwn',
+  'P': 'nnwnwnnwn', 'Q': 'nnnnnnwww', 'R': 'wnnnnnwwn', 'S': 'nnwnnnwwn', 'T': 'nnnnwnwwn',
+  'U': 'wwnnnnnnw', 'V': 'nwwnnnnnw', 'W': 'wwwnnnnnn', 'X': 'nwnnwnnnw', 'Y': 'wwnnwnnnn',
+  'Z': 'nwwnwnnnn', '-': 'nwnnnnwnw', '.': 'wwnnnnwnn', ' ': 'nwwnnnwnn', '$': 'nwnwnwnnn',
+  '/': 'nwnwnnnwn', '+': 'nwnnnwnwn', '%': 'nnnwnwnwn', '*': 'nwnnwnwnn',
+};
+function code39(text) {
+  const t = '*' + String(text).toUpperCase().replace(/[^0-9A-Z\-\.\ \$\/\+\%]/g, '') + '*';
+  let bars = '';
+  for (const c of t) {
+    const p = CODE39_TABLE[c];
+    if (!p) continue;
+    for (let i = 0; i < 9; i++) {
+      const wide = p[i] === 'w';
+      const el = i % 2 === 0 ? '1' : '0'; // 偶数位=条，奇数位=空
+      bars += el.repeat(wide ? 3 : 1);
+    }
+  }
+  // bars 是 '1/0' 字符串，1=黑条，0=白空（单位宽度 2px，宽窄比 3:1）
+  let svg = '', x = 0;
+  for (const b of bars) {
+    if (b === '1') svg += `<rect x="${x}" y="0" width="2" height="40" fill="#000"/>`;
+    x += 2;
+  }
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${x}" height="40">${svg}</svg>`;
+}
+function printSampleLabels(order, samples) {
+  const labels = samples.map(s => `
+    <div class="label">
+      <div class="lbl-head">${order.entrust_org || '&nbsp;'}</div>
+      <div class="barcode">${code39(s.sample_no)}</div>
+      <div class="code">${s.sample_no}</div>
+      <div class="info">${order.sample_name || ''}${order.sample_model ? ' / ' + order.sample_model : ''}</div>
+      <div class="info">状况：${s.condition || '-'}　状态：${s.status}</div>
+    </div>`).join('');
+  const w = window.open('', '_blank', 'width=720,height=820');
+  w.document.write(`<html><head><meta charset="utf-8"><title>样品标签/领出单</title><style>
+    body{font-family:'Microsoft YaHei',Arial,sans-serif;padding:24px}
+    .checkout{border:1px solid #000;padding:14px;margin-bottom:18px}
+    .checkout h3{margin:0 0 8px}.checkout p{margin:2px 0;font-size:13px}
+    .labels{display:flex;flex-wrap:wrap;gap:12px}
+    .label{border:1px solid #000;padding:10px 14px;width:210px;text-align:center}
+    .lbl-head{font-size:12px;margin-bottom:6px}
+    .barcode{display:inline-block}.code{font-family:monospace;font-size:13px;font-weight:700;letter-spacing:1px;margin-top:4px}
+    .info{font-size:11px;margin-top:3px}
+    @media print{body{padding:0}}
+  </style></head><body>
+    <div class="checkout"><h3>样品领出单</h3>
+      <p>实验编号：${order.experiment_no || order.order_no}　委托单位：${order.entrust_org || '-'}　样品名称：${order.sample_name || '-'}</p>
+      <p>领出人签字：＿＿＿＿＿＿　　/　　接收人签字：＿＿＿＿＿＿　　/　　日期：＿＿＿＿年＿＿月＿＿日</p>
+    </div>
+    <div class="labels">${labels}</div>
+    <script>window.print()<\/script></body></html>`);
+  w.document.close();
+}
+
 /* ---------------- 样品管理 ---------------- */
 const SamplesView = {
-  data: () => ({ orders: [], cur: null, samples: [], detail: null, showModal: false, eq: [] }),
+  data: () => ({ orders: [], cur: null, samples: [], detail: null, showModal: false, eq: [], retained: [], showReuse: false }),
   methods: {
     async load() { this.orders = await api('/api/orders?status='); },
     async open(o) { this.cur = o; this.detail = await api('/api/orders/' + o.id); this.samples = this.detail.samples; this.showModal = true; },
@@ -546,6 +685,23 @@ const SamplesView = {
       await api('/api/samples/' + s.id + '/dispose', 'POST', { action, remark: r });
       this.open(this.cur); toast('已' + action, 'success');
     },
+    async addSample() {
+      try {
+        await api('/api/samples', 'POST', { order_id: this.cur.id });
+        this.open(this.cur); toast('已新增样品（补样）', 'success');
+      } catch (e) { toast(e.message, 'error'); }
+    },
+    async openReuse() {
+      this.retained = await api('/api/samples?status=' + encodeURIComponent('已留存'));
+      this.showReuse = true;
+    },
+    async reuse(src) {
+      try {
+        await api('/api/samples', 'POST', { order_id: this.cur.id, source_sample_id: src.id });
+        this.showReuse = false; this.open(this.cur); toast('已复用留存样品', 'success');
+      } catch (e) { toast(e.message, 'error'); }
+    },
+    printLabels() { printSampleLabels(this.detail, this.samples); },
     badge, fmtDT,
   },
   mounted() { this.load(); },
@@ -566,6 +722,11 @@ const SamplesView = {
   <div class="modal-mask" v-if="showModal" @click.self="showModal=false">
     <div class="modal" style="width:900px">
       <h3>样品列表 —— {{cur.experiment_no||cur.order_no}}</h3>
+      <div style="margin-bottom:10px">
+        <button class="btn sm" @click="addSample">＋ 补样</button>
+        <button class="btn sm" @click="openReuse">复用留存样品</button>
+        <button class="btn primary sm" @click="printLabels">打印条码/领出单</button>
+      </div>
       <table class="tbl"><thead><tr><th>样品编号</th><th>状态</th><th>状况</th><th>结果</th><th>备注</th><th>操作</th></tr></thead>
       <tbody>
         <tr v-for="s in samples" :key="s.id">
@@ -585,6 +746,20 @@ const SamplesView = {
         </tr>
       </tbody></table>
       <div class="modal-actions"><button class="btn" @click="showModal=false">关闭</button></div>
+    </div>
+  </div>
+  <div class="modal-mask" v-if="showReuse" @click.self="showReuse=false">
+    <div class="modal" style="width:640px">
+      <h3>复用留存样品 —— 选择样品并入 {{cur.experiment_no||cur.order_no}}</h3>
+      <table class="tbl"><thead><tr><th>样品编号</th><th>状况</th><th>备注</th><th></th></tr></thead>
+      <tbody>
+        <tr v-for="s in retained" :key="s.id">
+          <td>{{s.sample_no}}</td><td>{{s.condition||'-'}}</td><td>{{s.remark||'-'}}</td>
+          <td><button class="btn primary sm" @click="reuse(s)">复用</button></td>
+        </tr>
+        <tr v-if="!retained.length"><td colspan="4" class="empty">暂无留存样品</td></tr>
+      </tbody></table>
+      <div class="modal-actions"><button class="btn" @click="showReuse=false">关闭</button></div>
     </div>
   </div>`,
 };
