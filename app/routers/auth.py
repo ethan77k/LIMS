@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from ..audit import log
+from ..audit import field_diff, log
 from ..database import get_db
 from ..deps import get_current_user, require_roles
 from ..models import User
@@ -68,12 +68,19 @@ def update_user(user_id: int, data: UserUpdate, db: Session = Depends(get_db), o
     user = db.get(User, user_id)
     if user is None:
         raise HTTPException(404, "用户不存在")
+    changes = {k: v for k, v in data.model_dump(exclude_unset=True).items() if k != "password"}
+    before = {k: getattr(user, k) for k in changes}
+    pwd_changed = False
     for field, value in data.model_dump(exclude_unset=True).items():
         if field == "password" and value:
             user.password_hash = hash_password(value)
+            pwd_changed = True
         elif field != "password":
             setattr(user, field, value)
-    log(db, operator, "修改用户", "user", user.id, f"{user.username} 角色/属性变更")
+    diff = field_diff(before, changes)
+    if pwd_changed:
+        diff = (diff + "；" if diff else "") + "密码: 已重置"
+    log(db, operator, "修改用户", "user", user.id, (user.username + " ｜ " + diff) if diff else user.username)
     db.commit()
     db.refresh(user)
     return user

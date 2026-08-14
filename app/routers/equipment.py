@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from ..audit import log
+from ..audit import field_diff, log
 from ..database import get_db
 from ..deps import require_roles
 from ..models import Equipment, EquipmentMaintenance, User
@@ -46,9 +46,12 @@ def update_equipment(eq_id: int, data: EquipmentUpdate, db: Session = Depends(ge
     eq = db.get(Equipment, eq_id)
     if eq is None:
         raise HTTPException(404, "设备不存在")
-    for field, value in data.model_dump(exclude_unset=True).items():
+    changes = data.model_dump(exclude_unset=True)
+    before = {k: getattr(eq, k) for k in changes}
+    for field, value in changes.items():
         setattr(eq, field, value)
-    log(db, user, "修改设备", "equipment", eq.id, eq.name)
+    diff = field_diff(before, changes)
+    log(db, user, "修改设备", "equipment", eq.id, (eq.name + " ｜ " + diff) if diff else eq.name)
     db.commit()
     return equipment_to_dict(eq)
 

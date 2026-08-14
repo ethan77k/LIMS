@@ -4,7 +4,7 @@
 （计费标准 + 计费明细 两个 Sheet 合并）。
 """
 from .database import Base, SessionLocal, engine
-from .models import Equipment, User
+from .models import Equipment, Notification, User
 from .security import hash_password
 
 
@@ -14,9 +14,29 @@ def init_db():
     try:
         _seed_users(db)
         _seed_equipment(db)
+        _migrate_notifications(db)
         db.commit()
     finally:
         db.close()
+
+
+def _migrate_notifications(db):
+    """把历史「按角色广播」通知（共享 is_read）转换为按用户各一条（独立已读）。幂等。"""
+    broadcasts = (
+        db.query(Notification)
+        .filter(Notification.role != "", Notification.user_id.is_(None))
+        .all()
+    )
+    for n in broadcasts:
+        recipients = db.query(User).filter(User.role == n.role, User.is_active.is_(True)).all()
+        for u in recipients:
+            db.add(
+                Notification(
+                    user_id=u.id, role="", title=n.title, content=n.content,
+                    order_id=n.order_id, is_read=n.is_read,
+                )
+            )
+        db.delete(n)
 
 
 def _seed_users(db):

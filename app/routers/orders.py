@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from ..audit import log
+from ..audit import field_diff, log
 from ..database import get_db
 from ..deps import get_current_user, get_current_user_optional, require_roles
 from ..models import EntrustOrder, User
@@ -127,9 +127,12 @@ def _check_editable(order: EntrustOrder, user: User) -> None:
 def update_order(order_id: int, data: OrderUpdate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     order = _get_order(db, order_id)
     _check_editable(order, user)
-    for field, value in data.model_dump(exclude_unset=True).items():
+    changes = data.model_dump(exclude_unset=True)
+    before = {k: getattr(order, k) for k in changes}
+    for field, value in changes.items():
         setattr(order, field, value)
-    log(db, user, "修改委托", "order", order.id, order.order_no)
+    diff = field_diff(before, changes)
+    log(db, user, "修改委托", "order", order.id, (order.order_no + " ｜ " + diff) if diff else order.order_no)
     db.commit()
     return {"message": "修改成功"}
 

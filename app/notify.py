@@ -15,17 +15,27 @@ def notify(
 ) -> None:
     """创建一条通知。
 
-    - user 指定时定向到该用户；否则 role 指定时广播给该角色（user_id 为空）。
+    - user 指定时定向到该用户。
+    - role 指定时**为每个该角色的在用账号各建一条**（各自独立已读），而非共享一条广播。
+    - 两者都空时发给所有在用账号。
     """
-    db.add(
-        Notification(
-            user_id=user.id if user else None,
-            role=role if not user else "",
-            title=title,
-            content=content,
-            order_id=order_id,
+    recipients: list[User] = []
+    if user is not None:
+        recipients = [user]
+    elif role:
+        recipients = db.query(User).filter(User.role == role, User.is_active.is_(True)).all()
+    else:
+        recipients = db.query(User).filter(User.is_active.is_(True)).all()
+    for u in recipients:
+        db.add(
+            Notification(
+                user_id=u.id,
+                role="",
+                title=title,
+                content=content,
+                order_id=order_id,
+            )
         )
-    )
 
 
 def notify_entruster(db: Session, order, title: str, content: str = "") -> None:

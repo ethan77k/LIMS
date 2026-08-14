@@ -4,6 +4,16 @@ from sqlalchemy.orm import Session
 from .models import AuditLog, User
 
 
+def field_diff(before: dict, after: dict) -> str:
+    """生成「字段: 旧→新；…」的改前/改后差异描述（仅含真正变化的字段）。"""
+    parts = []
+    for k, new in after.items():
+        old = before.get(k)
+        if str(old) != str(new):
+            parts.append(f"{k}: {old if old not in (None, '') else '（空）'}→{new if new not in (None, '') else '（空）'}")
+    return "；".join(parts)
+
+
 def log(
     db: Session,
     user: User | None,
