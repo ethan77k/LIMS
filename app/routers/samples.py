@@ -70,6 +70,8 @@ def dispose_sample(
     mapping = {"退还": "已退还", "报废": "已报废", "留存": "已留存"}
     if data.action not in mapping:
         raise HTTPException(400, "处置动作必须为：退还 / 报废 / 留存")
+    if sample.status not in ("已接收", "已排期", "实验中", "已完成"):
+        raise HTTPException(400, f"样品当前状态（{sample.status}）不可处置")
     sample.status = mapping[data.action]
     _log(db, sample, data.action, user.name, data.remark)
     log(db, user, f"样品{data.action}", "sample", sample.id, sample.sample_no)

@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from ..audit import log
 from ..database import get_db
-from ..deps import get_current_user_optional, require_roles
+from ..deps import get_current_user, get_current_user_optional, require_roles
 from ..models import EntrustOrder, User
 from ..notify import notify
 from ..numbering import next_order_no
@@ -35,6 +35,25 @@ def create_order(
     # 登录的委托人提交时，绑定到当前账号（委托人姓名强制取账号姓名，避免填错对不上）
     if user is not None and user.role == "entruster":
         values["entruster"] = user.name
+
+    # 服务端必填校验（防止绕过前端直接调接口提交空单）
+    _require_fields = {
+        "委托单位": values.get("entrust_org"),
+        "委托人": values.get("entruster"),
+        "样品名称": values.get("sample_name"),
+        "检测项目": values.get("test_item"),
+        "联系电话": values.get("phone"),
+        "内网邮箱": values.get("email"),
+    }
+    missing = [k for k, v in _require_fields.items() if not str(v or "").strip()]
+    if missing:
+        raise HTTPException(400, "必填项缺失：" + "、".join(missing))
+    email = str(values.get("email") or "").strip()
+    if "@" not in email:
+        raise HTTPException(400, "内网邮箱格式不正确（需包含 @）")
+    if int(values.get("sample_count") or 0) < 1:
+        raise HTTPException(400, "样品数量至少为 1")
+
     order = EntrustOrder(**values, order_no=next_order_no(db))
     db.add(order)
     db.flush()
@@ -96,24 +115,30 @@ def get_order(order_id: int, db: Session = Depends(get_db), _: User = Depends(re
     return order_to_dict(_get_order(db, order_id))
 
 
-@router.put("/{order_id}")
-def update_order(order_id: int, data: OrderUpdate, db: Session = Depends(get_db)):
-    order = _get_order(db, order_id)
+def _check_editable(order: EntrustOrder, user: User) -> None:
+    """校验修改/删除权限：仅待审核可改，且委托人只能操作本人委托单。"""
     if order.status != "待审核":
-        raise HTTPException(400, "仅未审核的委托单可修改")
+        raise HTTPException(400, "仅未审核的委托单可修改/删除")
+    if user.role == "entruster" and order.entruster != user.name:
+        raise HTTPException(403, "只能修改/删除本人名下的委托单")
+
+
+@router.put("/{order_id}")
+def update_order(order_id: int, data: OrderUpdate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    order = _get_order(db, order_id)
+    _check_editable(order, user)
     for field, value in data.model_dump(exclude_unset=True).items():
         setattr(order, field, value)
-    log(db, None, "修改委托", "order", order.id, order.order_no)
+    log(db, user, "修改委托", "order", order.id, order.order_no)
     db.commit()
     return {"message": "修改成功"}
 
 
 @router.delete("/{order_id}")
-def delete_order(order_id: int, db: Session = Depends(get_db)):
+def delete_order(order_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     order = _get_order(db, order_id)
-    if order.status != "待审核":
-        raise HTTPException(400, "仅未审核的委托单可删除")
-    log(db, None, "删除委托", "order", order.id, order.order_no)
+    _check_editable(order, user)
+    log(db, user, "删除委托", "order", order.id, order.order_no)
     db.delete(order)
     db.commit()
     return {"message": "删除成功"}

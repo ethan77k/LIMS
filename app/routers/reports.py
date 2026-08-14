@@ -99,31 +99,59 @@ def render_entrust_html(o: EntrustOrder) -> str:
 
 
 def render_test_html(o: EntrustOrder, version: str = "常规") -> str:
-    results_html = ""
-    for s in o.samples:
-        cls = "result-ok" if s.result == "OK" else ("result-ng" if s.result == "NG" else "")
-        results_html += f'<td class="{cls}">{s.result or "-"}</td>'
-    passed = "合格" if all(s.result == "OK" for s in o.samples) else "不合格"
+    samples = list(o.samples)
+    ok_count = sum(1 for s in samples if s.result == "OK")
+    ng_count = sum(1 for s in samples if s.result == "NG")
+    passed = "合格" if samples and ng_count == 0 and ok_count == len(samples) else "不合格"
     passed_en = "Passed" if passed == "合格" else "Failed"
+
+    if version == "常规":
+        # 缩减版：只汇总结论，不逐样品、不含样品编号/试验条件/图片
+        result_rows = (
+            '<tr><td class="lbl">检验结果<br>Test Result</td>'
+            f'<td colspan="9">样品总数 {len(samples)}，合格 {ok_count}，不合格 {ng_count}'
+            f'　（未判定 {len(samples) - ok_count - ng_count}）</td></tr>'
+        )
+        extra = ""
+    else:
+        # 检测版：逐样品编号 + 结果，附样品编号、试验条件与实物图占位
+        header_cells = ''.join(
+            f'<td style="text-align:center;font-weight:600">{i+1}#</td>' for i in range(len(samples))
+        ) or '<td></td>'
+        result_cells = ''
+        for s in samples:
+            cls = "result-ok" if s.result == "OK" else ("result-ng" if s.result == "NG" else "")
+            result_cells += f'<td class="{cls}">{s.result or "-"}</td>'
+        sample_nos = "；".join(s.sample_no for s in samples)
+        result_rows = (
+            '<tr><td class="lbl" rowspan="2">检验结果<br>Test Result</td>' + header_cells + '</tr>'
+            '<tr>' + (result_cells or '<td></td>') + '</tr>'
+            f'<tr><td class="lbl">样品编号</td><td colspan="9">{sample_nos or "-"}</td></tr>'
+            f'<tr><td class="lbl">试验条件</td><td colspan="9">{_fmt(o.test_condition) or "-"}</td></tr>'
+        )
+        extra = (
+            '<div style="margin-top:10px"><b>试验前样品图片 (Samples Before Test)：</b>'
+            '<div style="border:1px dashed #999;padding:24px;text-align:center;color:#999">'
+            '（样品实物图待上传后显示）</div></div>'
+        )
+
     return f"""<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8">
 <title>检测报告 {o.experiment_no or o.order_no}</title><style>{_BASE_CSS}</style></head><body>
 <div class="report">
   {_report_head()}
   <div class="form-no">表-TC11-02A</div>
-  <h2 style="text-align:center;font-size:16px;margin:6px 0">检测报告 Test Report</h2>
+  <h2 style="text-align:center;font-size:16px;margin:6px 0">检测报告 Test Report（{'缩减版' if version == '常规' else '检测版'}）</h2>
   <table>
     <tr><td class="lbl" rowspan="3">预检查<br>Pre-check</td><td class="lbl">委托单编号</td><td colspan="4">{_fmt(o.order_no)}</td><td class="lbl">接收时间</td><td colspan="3">{_dt_short(o.created_at)}</td></tr>
     <tr><td class="lbl">样品检查</td><td colspan="8">{_fmt(o.sample_status)}</td></tr>
     <tr><td class="lbl">样品状态</td><td colspan="8">{_fmt(o.sample_status)}</td></tr>
-    <tr><td class="lbl" rowspan="2">检验结果<br>Test Result</td>
-      {''.join(f'<td style="text-align:center;font-weight:600">{i+1}#</td>' for i in range(len(o.samples))) or '<td></td>'}
-    </tr>
-    <tr>{results_html or '<td></td>'}</tr>
+    {result_rows}
     <tr><td class="lbl">测试结果</td><td colspan="9" style="font-size:15px"><b>试验后样品外观正常。测试结果：{passed} Test Result: {passed_en}</b>（检验单位公章）</td></tr>
     <tr><td class="lbl">备注<br>Remark</td><td colspan="9">{_fmt(o.remark)}</td></tr>
     <tr><td class="lbl">拟制人</td><td colspan="2" class="sig"></td><td class="lbl">授权签字人</td><td colspan="3" class="sig">{_fmt(o.reviewer.name if o.reviewer else '')}</td><td class="lbl">签字人职务</td><td colspan="2">□中心主任 □技术负责人</td></tr>
     <tr><td class="lbl">审核人</td><td colspan="2">{_fmt(o.entruster)}</td><td class="lbl">签发日期</td><td colspan="5">{_dt_short(o.finish_at or o.review_at)}</td></tr>
   </table>
+  {extra}
   <div class="footer">注：1、检测报告只对试验样品负责，实验室只对结果与标准的符合性进行判定，不对结果数据进行分析。2、每项检测只提供一份检测报告，复印或修改视为无效。</div>
 </div>
 <script>window.print()</script></body></html>"""
