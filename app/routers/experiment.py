@@ -46,6 +46,18 @@ def end_schedule(schedule_id: int, db: Session = Depends(get_db), user: User = D
     schedule.status = "已完成"
     schedule.actual_end = datetime.now()
     db.add(SampleOperation(sample_id=schedule.sample_id, action="结束实验", operator=user.name))
+    db.flush()  # autoflush=False，需显式 flush 让后续 count 反映本次状态变更
+    # 该样品所有排期均已完成时，样品状态退出「实验中」
+    sample = db.get(Sample, schedule.sample_id)
+    if sample is not None and sample.status == "实验中":
+        remaining = (
+            db.query(Schedule)
+            .filter(Schedule.sample_id == sample.id, Schedule.status != "已完成")
+            .count()
+        )
+        if remaining == 0:
+            sample.status = "已完成"
+            db.add(SampleOperation(sample_id=sample.id, action="实验完成", operator=user.name))
     log(db, user, "结束实验", "schedule", schedule.id, schedule.sample.sample_no if schedule.sample else "")
     db.commit()
     return schedule_to_dict(schedule)
@@ -76,6 +88,8 @@ def finish_order(order_id: int, db: Session = Depends(get_db), user: User = Depe
         raise HTTPException(404, "委托单不存在")
     if order.status == "已完成":
         raise HTTPException(400, "该委托单已结束")
+    if not order.schedules:
+        raise HTTPException(400, "该委托单尚无排期，无法结束实验")
     # 所有排期必须已完成
     unfinished = [s for s in order.schedules if s.status != "已完成"]
     if unfinished:

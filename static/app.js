@@ -12,9 +12,9 @@ const state = reactive({
 
 /* ---------------- 角色权限与默认首页 ---------------- */
 const ROLE_ROUTES = {
-  admin: ['/dashboard', '/orders/new', '/orders/query', '/review', '/samples', '/schedule', '/experiment', '/reports', '/equipment', '/boards', '/handover', '/statistics', '/customers', '/audit', '/users'],
-  experimenter: ['/dashboard', '/orders/query', '/review', '/samples', '/schedule', '/experiment', '/reports', '/boards', '/handover', '/statistics', '/customers'],
-  entruster: ['/orders/new', '/orders/query'],
+  admin: ['/dashboard', '/orders/new', '/orders/query', '/review', '/samples', '/schedule', '/experiment', '/reports', '/equipment', '/boards', '/handover', '/statistics', '/customers', '/audit', '/users', '/cases'],
+  experimenter: ['/dashboard', '/orders/query', '/review', '/samples', '/schedule', '/experiment', '/reports', '/boards', '/handover', '/statistics', '/customers', '/cases'],
+  entruster: ['/orders/new', '/orders/query', '/cases'],
 };
 function homeRoute(role) { return role === 'entruster' ? '/orders/query' : '/dashboard'; }
 
@@ -47,6 +47,11 @@ function navigate(r) { location.hash = r; }
 function fmtDT(v) { return v ? String(v).replace('T', ' ').slice(0, 16) : ''; }
 function fmtD(v) { return v ? String(v).slice(0, 10) : ''; }
 function fmtLocal(v) { return v ? String(v).slice(0, 16) : ''; }
+function escHtml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
 
 const ORDER_STATUS = {
   '待审核': 'gray', '已审核': 'blue', '已排期': 'purple', '实验中': 'orange', '已完成': 'green', '已否决': 'red',
@@ -122,7 +127,7 @@ const MainLayout = {
         admin: [
           { group: '工作台', links: [{ r: '/dashboard', t: '工作台' }] },
           { group: '委托管理', links: [
-            { r: '/orders/new', t: '委托申请' }, { r: '/orders/query', t: '委托查询' }, { r: '/review', t: '委托审核' }] },
+            { r: '/orders/new', t: '委托申请' }, { r: '/orders/query', t: '委托查询' }, { r: '/review', t: '委托审核' }, { r: '/cases', t: '测试用例库' }] },
           { group: '实验管理', links: [
             { r: '/samples', t: '样品管理' }, { r: '/schedule', t: '实验排期' }, { r: '/experiment', t: '开始/结束实验' }] },
           { group: '报告', links: [{ r: '/reports', t: '实验报告' }] },
@@ -134,7 +139,7 @@ const MainLayout = {
         experimenter: [
           { group: '工作台', links: [{ r: '/dashboard', t: '工作台' }] },
           { group: '委托管理', links: [
-            { r: '/orders/query', t: '委托查询' }, { r: '/review', t: '委托审核' }] },
+            { r: '/orders/query', t: '委托查询' }, { r: '/review', t: '委托审核' }, { r: '/cases', t: '测试用例库' }] },
           { group: '实验管理', links: [
             { r: '/samples', t: '样品管理' }, { r: '/schedule', t: '实验排期' }, { r: '/experiment', t: '开始/结束实验' }] },
           { group: '报告', links: [{ r: '/reports', t: '实验报告' }] },
@@ -142,7 +147,7 @@ const MainLayout = {
           { group: '资源', links: [{ r: '/boards', t: '展板' }, { r: '/handover', t: '交接班' }, { r: '/customers', t: '客户档案' }] },
         ],
         entruster: [
-          { group: '委托', links: [{ r: '/orders/new', t: '委托申请' }, { r: '/orders/query', t: '委托查询' }] },
+          { group: '委托', links: [{ r: '/orders/new', t: '委托申请' }, { r: '/orders/query', t: '委托查询' }, { r: '/cases', t: '测试用例库' }] },
         ],
       };
       return menus[state.role] || menus.entruster;
@@ -152,7 +157,7 @@ const MainLayout = {
         '/dashboard': '工作台', '/orders/new': '委托申请', '/orders/query': '委托查询', '/review': '委托审核',
         '/samples': '样品管理', '/schedule': '实验排期', '/experiment': '开始/结束实验', '/reports': '实验报告',
         '/equipment': '设备管理', '/boards': '展板', '/handover': '交接班', '/statistics': '统计图表',
-        '/customers': '客户档案', '/audit': '审计日志', '/users': '用户管理',
+        '/customers': '客户档案', '/audit': '审计日志', '/users': '用户管理', '/cases': '测试用例库',
       };
       return m[state.route] || '工作台';
     },
@@ -227,6 +232,7 @@ const MainLayout = {
         <customers-view v-else-if="state.route==='/customers'"></customers-view>
         <audit-view v-else-if="state.route==='/audit'"></audit-view>
         <users-view v-else-if="state.route==='/users'"></users-view>
+        <testcase-library v-else-if="state.route==='/cases'"></testcase-library>
       </div>
     </div>
     <div class="modal-mask" v-if="showPwd" @click.self="showPwd=false">
@@ -303,31 +309,105 @@ const Dashboard = {
 
 /* ---------------- 委托申请 ---------------- */
 const OrderNew = {
-  data: () => ({ form: emptyOrder(), result: null }),
+  data: () => ({ form: emptyOrder(), results: [], caseGroups: [], activeGroupId: null, mode: 'manual' }),
+  computed: {
+    activeGroupCases() {
+      const g = this.caseGroups.find(x => x.id === this.activeGroupId);
+      return g ? (g.cases || []) : [];
+    },
+    selectedCases() {
+      return this.caseGroups.flatMap(g => g.cases || []).filter(c => c.checked);
+    },
+  },
   methods: {
     async submit() {
-      if (!this.form.entrust_org || !this.form.entruster || !this.form.sample_name || !this.form.sample_model || !this.form.test_item || !this.form.test_stage || !this.form.sample_count || !this.form.sample_unit || !this.form.phone || !this.form.email || !this.form.sample_dispose) {
-        toast('请填写所有必填项（委托单位/委托人/样品名称/DHD型号/检测项目/测试阶段/数量/单位/联系电话/DHD邮箱/样品处理）', 'error'); return;
+      // 公共必填项（数量/单位仅手动方式需填写，勾选方式由用例带出）
+      const required = [
+        ['entrust_org', '委托单位'], ['entruster', '委托人'], ['sample_name', '样品名称'],
+        ['sample_model', 'DHD型号'], ['test_stage', '测试阶段'],
+        ['phone', '联系电话'], ['email', 'DHD邮箱'], ['sample_dispose', '样品处理'],
+      ];
+      if (this.mode === 'manual') {
+        required.push(['sample_count', '数量'], ['sample_unit', '单位']);
       }
+      for (const [k, label] of required) {
+        if (!this.form[k]) { toast('请填写：' + label, 'error'); return; }
+      }
+      if (this.mode === 'manual' && this.form.sample_count && Number(this.form.sample_count) < 1) { toast('样品数量至少为 1', 'error'); return; }
       try {
-        const payload = { ...this.form, required_start: this.form.required_start || null };
-        const r = await api('/api/orders', 'POST', payload);
-        this.result = r; toast('提交成功', 'success');
+        const results = [];
+        if (this.mode === 'case') {
+          const cases = this.selectedCases;
+          if (!cases.length) { toast('请至少勾选一个测试项', 'error'); return; }
+          // 每个勾选的用例各生成一份委托单，数量/单位由用例带出，其它字段复制
+          for (const c of cases) {
+            const payload = { ...this.form, test_item: c.test_item, test_condition: c.test_condition, criteria: c.criteria, sample_count: c.count, sample_unit: c.unit, case_id: c.id, required_start: this.form.required_start || null };
+            results.push(await api('/api/orders', 'POST', payload));
+          }
+          toast('已生成 ' + results.length + ' 份委托单', 'success');
+        } else {
+          if (!this.form.test_item) { toast('请填写：检测项目', 'error'); return; }
+          const payload = { ...this.form, required_start: this.form.required_start || null };
+          results.push(await api('/api/orders', 'POST', payload));
+          toast('提交成功', 'success');
+        }
+        this.results = results;
       } catch (e) { toast(e.message, 'error'); }
     },
-    reset() { this.form = emptyOrder(); this.result = null; },
+    switchMode(m) { this.mode = m; },
+    reset() {
+      this.form = emptyOrder();
+      this.results = [];
+      this.caseGroups.forEach(g => (g.cases || []).forEach(c => c.checked = false));
+    },
   },
-  mounted() {
+  async mounted() {
     // 登录的委托人：自动带出本人姓名，确保委托单与账号绑定
     if (state.token && state.role === 'entruster' && !this.form.entruster) {
       this.form.entruster = state.name;
+    }
+    if (state.token) {
+      try {
+        const groups = await api('/api/cases/groups?with_cases=true');
+        groups.forEach(g => (g.cases || []).forEach(c => c.checked = false));
+        this.caseGroups = groups;
+      } catch (e) {}
     }
   },
   template: `
   <div class="card">
     <h3>实验委托申请 <span style="font-size:12px;color:#c62828">（红色标记为必填项）</span></h3>
-    <div v-if="result" style="background:#e6f4ea;padding:12px;border-radius:6px;margin-bottom:14px">
-      委托申请提交成功！委托单编号：<b>{{result.order_no}}</b>
+    <div class="tabs">
+      <div class="tab" :class="{active: mode==='manual'}" @click="switchMode('manual')">手动填写委托</div>
+      <div class="tab" :class="{active: mode==='case'}" @click="switchMode('case')">从用例库勾选</div>
+    </div>
+    <div v-if="results.length" style="background:#e6f4ea;padding:12px;border-radius:6px;margin-bottom:14px">
+      委托申请提交成功！共生成 <b>{{results.length}}</b> 份委托单：
+      <div v-for="(r, i) in results" :key="i" style="margin-top:2px">委托单编号：<b>{{r.order_no}}</b></div>
+    </div>
+    <div class="form-row" v-if="mode==='case' && caseGroups.length" style="background:#f5f7fa;padding:10px;border-radius:6px;margin-bottom:14px;align-items:flex-start">
+      <div class="form-group" style="flex:0 0 210px;margin:0">
+        <label>选择客户分组</label>
+        <select v-model="activeGroupId">
+          <option :value="null">—— 选择客户分组 ——</option>
+          <option v-for="g in caseGroups" :key="g.id" :value="g.id">{{g.name}}</option>
+        </select>
+      </div>
+      <div class="form-group" style="flex:1;margin:0">
+        <label>勾选测试项（已选 {{selectedCases.length}} 项，提交后每个用例各生成一份委托单）</label>
+        <div class="case-check-list">
+          <label v-for="c in activeGroupCases" :key="c.id" class="case-check" :class="{checked: c.checked}">
+            <input type="checkbox" v-model="c.checked">
+            <span class="case-check-name">{{c.test_item}}</span>
+            <span class="case-check-hint">×{{c.count}}{{c.unit}}</span>
+            <span class="case-check-hint" v-if="c.criteria">（{{c.criteria}}）</span>
+          </label>
+          <div v-if="!activeGroupCases.length" class="empty" style="padding:10px">该分组暂无用例</div>
+        </div>
+      </div>
+    </div>
+    <div v-if="mode==='case' && !caseGroups.length" style="background:#fff7e6;padding:10px;border-radius:6px;margin-bottom:14px;color:#b26a00">
+      测试用例库为空，请先到「测试用例库」页面建立客户分组和用例，再回来勾选提交。
     </div>
     <div class="form-row">
       <div class="form-group"><label><span class="req">*</span>委托单位</label><select v-model="form.entrust_org"><option>音频研发中心</option><option>创新事业部</option><option>国内事业部</option><option>高端事业部</option><option>营销中心</option><option>供应链中心</option><option>工程质量中心</option></select></div>
@@ -342,11 +422,11 @@ const OrderNew = {
       <div class="form-group"><label>客户型号</label><input v-model="form.customer_model"></div>
     </div>
     <div class="form-row">
-      <div class="form-group"><label><span class="req">*</span>检测项目</label><input v-model="form.test_item"></div>
-      <div class="form-group"><label>检测项目(英文)</label><input v-model="form.test_item_en"></div>
+      <div class="form-group" v-if="mode==='manual'"><label><span class="req">*</span>检测项目</label><input v-model="form.test_item"></div>
+      <div class="form-group" v-if="mode==='manual'"><label>检测项目(英文)</label><input v-model="form.test_item_en"></div>
       <div class="form-group" style="flex:0 0 130px"><label><span class="req">*</span>测试阶段</label><select v-model="form.test_stage"><option>EVT</option><option>DVT</option><option>DVT-2</option><option>DVT-3</option><option>PVT</option><option>PVT-2</option><option>PVT-3</option><option>MP</option><option>二供</option><option>三供</option><option>四供</option><option>五供</option></select></div>
-      <div class="form-group" style="flex:0 0 90px"><label><span class="req">*</span>数量</label><input type="number" v-model.number="form.sample_count"></div>
-      <div class="form-group" style="flex:0 0 80px"><label><span class="req">*</span>单位</label><input v-model="form.sample_unit"></div>
+      <div class="form-group" v-if="mode==='manual'" style="flex:0 0 90px"><label><span class="req">*</span>数量</label><input type="number" v-model.number="form.sample_count"></div>
+      <div class="form-group" v-if="mode==='manual'" style="flex:0 0 80px"><label><span class="req">*</span>单位</label><input v-model="form.sample_unit"></div>
     </div>
     <div class="form-row">
       <div class="form-group"><label>检测依据</label><input v-model="form.test_basis" placeholder="没有则填客户自定义条件"></div>
@@ -366,7 +446,8 @@ const OrderNew = {
       <div class="form-group"><label><span class="req">*</span>样品处理</label><select v-model="form.sample_dispose"><option>退还</option><option>报废</option><option>留存</option></select></div>
       <div class="form-group"><label>要求完成时间</label><input type="datetime-local" v-model="form.required_start"></div>
     </div>
-    <div class="form-group"><label>试验条件</label><textarea v-model="form.test_condition"></textarea></div>
+    <div class="form-group" v-if="mode==='manual'"><label>试验条件</label><textarea v-model="form.test_condition"></textarea></div>
+    <div class="form-group" v-if="mode==='manual'"><label>判定标准</label><textarea v-model="form.criteria"></textarea></div>
     <div class="form-group"><label>备注</label><textarea v-model="form.remark"></textarea></div>
     <div style="margin-top:10px">
       <button class="btn primary" @click="submit">提交申请</button>
@@ -381,9 +462,180 @@ function emptyOrder() {
     test_stage: '', sample_model: '', customer_model: '', sample_count: '', sample_unit: '',
     phone: '', email: '', tracker: '', tracker_email: '', test_reason: '例行试验', report_lang: '中文',
     sample_status: '样品正常', storage_require: '常温存放', sample_dispose: '退还',
-    test_condition: '', remark: '', required_start: '',
+    test_condition: '', criteria: '', remark: '', required_start: '', case_id: null,
   };
 }
+
+/* ---------------- 测试用例库 ---------------- */
+async function uploadCaseImage(caseId, file) {
+  const fd = new FormData();
+  fd.append('file', file);
+  const res = await fetch('/api/cases/' + caseId + '/images', {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + state.token },
+    body: fd,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 401) { logout(); throw new Error('未登录或登录已过期'); }
+  if (!res.ok) throw new Error((data && data.detail) || '上传失败');
+  return data;
+}
+
+const TestCaseLibrary = {
+  data: () => ({
+    groups: [], activeGroupId: null,
+    showGroupModal: false, groupForm: { name: '', remark: '' },
+    showCaseModal: false, caseForm: {}, editingCaseId: null,
+    uploading: false,
+  }),
+  computed: {
+    activeGroup() { return this.groups.find(g => g.id === this.activeGroupId) || null; },
+  },
+  methods: {
+    async load() {
+      this.groups = await api('/api/cases/groups?with_cases=true');
+      if (!this.activeGroupId && this.groups.length) this.activeGroupId = this.groups[0].id;
+      if (this.activeGroupId && !this.groups.find(g => g.id === this.activeGroupId)) {
+        this.activeGroupId = this.groups.length ? this.groups[0].id : null;
+      }
+    },
+    selectGroup(g) { this.activeGroupId = g.id; },
+    openNewGroup() { this.groupForm = { name: '', remark: '' }; this.showGroupModal = true; },
+    async saveGroup() {
+      if (!this.groupForm.name.trim()) { toast('请输入分组名（客户名）', 'error'); return; }
+      try {
+        await api('/api/cases/groups', 'POST', this.groupForm);
+        this.showGroupModal = false; toast('分组已创建', 'success'); await this.load();
+      } catch (e) { toast(e.message, 'error'); }
+    },
+    async renameGroup() {
+      if (!this.activeGroup) return;
+      const name = prompt('新的分组名', this.activeGroup.name);
+      if (name == null || !name.trim()) return;
+      try { await api('/api/cases/groups/' + this.activeGroup.id, 'PUT', { name }); await this.load(); toast('已重命名', 'success'); }
+      catch (e) { toast(e.message, 'error'); }
+    },
+    async deleteGroup() {
+      if (!this.activeGroup) return;
+      if (!confirm('删除分组「' + this.activeGroup.name + '」将同时删除其下所有用例与图片，确认？')) return;
+      try { await api('/api/cases/groups/' + this.activeGroup.id, 'DELETE'); this.activeGroupId = null; await this.load(); toast('已删除', 'success'); }
+      catch (e) { toast(e.message, 'error'); }
+    },
+    openNewCase() {
+      if (!this.activeGroup) { toast('请先选择或创建分组', 'error'); return; }
+      this.editingCaseId = null;
+      this.caseForm = { group_id: this.activeGroup.id, test_item: '', test_condition: '', criteria: '', count: 1, unit: '只', remark: '' };
+      this.showCaseModal = true;
+    },
+    openEditCase(c) {
+      this.editingCaseId = c.id;
+      this.caseForm = { group_id: c.group_id, test_item: c.test_item, test_condition: c.test_condition, criteria: c.criteria, count: c.count, unit: c.unit, remark: c.remark };
+      this.showCaseModal = true;
+    },
+    async saveCase() {
+      if (!this.caseForm.test_item.trim()) { toast('请填写检测项目', 'error'); return; }
+      try {
+        if (this.editingCaseId) await api('/api/cases/' + this.editingCaseId, 'PUT', this.caseForm);
+        else await api('/api/cases', 'POST', this.caseForm);
+        this.showCaseModal = false; toast('已保存', 'success'); await this.load();
+      } catch (e) { toast(e.message, 'error'); }
+    },
+    async deleteCase(c) {
+      if (!confirm('删除用例「' + c.test_item + '」及其图片？')) return;
+      try { await api('/api/cases/' + c.id, 'DELETE'); await this.load(); toast('已删除', 'success'); }
+      catch (e) { toast(e.message, 'error'); }
+    },
+    async onPickImage(c, e) {
+      const file = e.target.files && e.target.files[0];
+      e.target.value = '';
+      if (!file) return;
+      if (this.uploading) return;
+      this.uploading = true;
+      try { await uploadCaseImage(c.id, file); toast('图片已上传', 'success'); await this.load(); }
+      catch (err) { toast(err.message, 'error'); }
+      finally { this.uploading = false; }
+    },
+    async deleteImage(c, img) {
+      if (!confirm('删除该图片？')) return;
+      try { await api('/api/cases/images/' + img.id, 'DELETE'); await this.load(); toast('已删除图片', 'success'); }
+      catch (e) { toast(e.message, 'error'); }
+    },
+  },
+  mounted() { this.load(); },
+  template: `
+  <div class="card">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+      <h3 style="margin:0">测试用例库</h3>
+      <button class="btn primary sm" @click="openNewGroup">+ 新建分组</button>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+      <b>客户分组：</b>
+      <button v-for="g in groups" :key="g.id" class="btn sm" :class="{primary: g.id===activeGroupId}" @click="selectGroup(g)">{{g.name}}（{{g.case_count}}）</button>
+      <span v-if="!groups.length" class="empty" style="margin:0">暂无分组，点击右上角「新建分组」</span>
+    </div>
+
+    <div v-if="activeGroup" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <div><b>{{activeGroup.name}}</b> <span v-if="activeGroup.remark" style="color:#888;font-size:12px">— {{activeGroup.remark}}</span></div>
+      <div>
+        <button class="btn sm" @click="renameGroup">重命名</button>
+        <button class="btn sm" style="color:#c62828" @click="deleteGroup">删除分组</button>
+        <button class="btn primary sm" @click="openNewCase">+ 新建用例</button>
+      </div>
+    </div>
+
+    <table class="tbl" v-if="activeGroup && activeGroup.cases.length">
+      <thead><tr><th style="width:120px">检测项目</th><th style="width:70px">数量</th><th>试验条件</th><th>判定标准</th><th style="width:120px">备注</th><th style="width:190px">图片</th><th style="width:170px">操作</th></tr></thead>
+      <tbody>
+        <tr v-for="c in activeGroup.cases" :key="c.id">
+          <td>{{c.test_item}}</td>
+          <td>{{c.count}}{{c.unit}}</td>
+          <td style="white-space:pre-wrap">{{c.test_condition || '—'}}</td>
+          <td style="white-space:pre-wrap">{{c.criteria || '—'}}</td>
+          <td>{{c.remark || '—'}}</td>
+          <td>
+            <div style="display:flex;gap:4px;flex-wrap:wrap">
+              <div v-for="img in c.images" :key="img.id" style="position:relative">
+                <a :href="img.path" target="_blank"><img :src="img.path" :title="img.filename" style="width:44px;height:44px;object-fit:cover;border-radius:4px;border:1px solid #ddd;display:block"></a>
+                <span @click="deleteImage(c, img)" style="position:absolute;top:-6px;right:-6px;background:#c62828;color:#fff;width:16px;height:16px;border-radius:50%;line-height:16px;text-align:center;font-size:12px;cursor:pointer">×</span>
+              </div>
+            </div>
+          </td>
+          <td>
+            <button class="btn link" @click="openEditCase(c)">编辑</button>
+            <label class="btn link" style="cursor:pointer">传图<input type="file" accept="image/*" style="display:none" @change="onPickImage(c, $event)"></label>
+            <button class="btn link" style="color:#c62828" @click="deleteCase(c)">删除</button>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+    <div v-else-if="activeGroup" class="empty">该分组暂无用例，点击「+ 新建用例」添加</div>
+    <div v-else class="empty">请先选择或新建一个客户分组</div>
+
+    <div class="modal-mask" v-if="showGroupModal" @click.self="showGroupModal=false">
+      <div class="modal" style="width:420px">
+        <h3>新建分组</h3>
+        <div class="form-group"><label>分组名（客户名）</label><input v-model="groupForm.name" placeholder="如：华为 / 小米 / 客户A"></div>
+        <div class="form-group"><label>备注</label><input v-model="groupForm.remark"></div>
+        <div class="modal-actions"><button class="btn" @click="showGroupModal=false">取消</button><button class="btn primary" @click="saveGroup">保存</button></div>
+      </div>
+    </div>
+
+    <div class="modal-mask" v-if="showCaseModal" @click.self="showCaseModal=false">
+      <div class="modal" style="width:520px">
+        <h3>{{editingCaseId ? '编辑用例' : '新建用例'}}</h3>
+        <div class="form-group"><label>检测项目</label><input v-model="caseForm.test_item" placeholder="如：跌落试验"></div>
+        <div class="form-group"><label>试验条件</label><textarea v-model="caseForm.test_condition" placeholder="如：1.5m 高度，3 个方向各 1 次"></textarea></div>
+        <div class="form-group"><label>判定标准</label><textarea v-model="caseForm.criteria" placeholder="如：无破损、无变形、功能正常"></textarea></div>
+        <div class="form-row">
+          <div class="form-group" style="flex:0 0 120px"><label>数量</label><input type="number" v-model.number="caseForm.count"></div>
+          <div class="form-group" style="flex:1"><label>单位</label><input v-model="caseForm.unit" placeholder="如：只 / 台 / 批"></div>
+        </div>
+        <div class="form-group"><label>备注</label><input v-model="caseForm.remark"></div>
+        <div class="modal-actions"><button class="btn" @click="showCaseModal=false">取消</button><button class="btn primary" @click="saveCase">保存</button></div>
+      </div>
+    </div>
+  </div>`,
+};
 
 /* ---------------- 委托查询 ---------------- */
 const OrderQuery = {
@@ -400,9 +652,10 @@ const OrderQuery = {
       if (this.keyword) q.set('keyword', this.keyword);
       this.all = await api('/api/orders?' + q.toString());
     },
+    isAdmin() { return state.role === 'admin'; },
     canEdit(o) {
+      if (!this.isAdmin()) return false;
       if (o.status !== '待审核') return false;
-      if (state.role === 'entruster' && o.entruster !== state.name) return false;
       return true;
     },
     openEdit(o) {
@@ -418,7 +671,7 @@ const OrderQuery = {
         phone: o.phone, email: o.email, tracker: o.tracker, tracker_email: o.tracker_email,
         test_reason: o.test_reason, report_lang: o.report_lang,
         sample_status: o.sample_status, storage_require: o.storage_require,
-        sample_dispose: o.sample_dispose, test_condition: o.test_condition, remark: o.remark,
+        sample_dispose: o.sample_dispose, test_condition: o.test_condition, criteria: o.criteria, remark: o.remark,
         required_start: o.required_start ? String(o.required_start).slice(0, 16) : '',
       };
       this.showEdit = true;
@@ -464,17 +717,17 @@ const OrderQuery = {
           <option v-for="s in ['待审核','已审核','已排期','实验中','已完成','已否决']" :key="s" :value="s">{{s}}</option></select>
         <input v-model="keyword" placeholder="编号/委托人/单位/型号/样品名"><button class="btn primary" @click="search">查询</button>
       </div>
-      <table class="tbl"><thead><tr><th>委托编号</th><th>实验编号</th><th>委托单位</th><th>委托人</th><th>样品</th><th>检测项目</th><th>状态</th><th>备注</th><th>委托时间</th><th>操作</th></tr></thead>
+      <table class="tbl"><thead><tr><th>委托编号</th><th>实验编号</th><th>委托单位</th><th>委托人</th><th>样品</th><th>检测项目</th><th>状态</th><th>备注</th><th>委托时间</th><th v-if="isAdmin()">操作</th></tr></thead>
       <tbody>
         <tr v-for="o in all" :key="o.id">
           <td>{{o.order_no}}</td><td>{{o.experiment_no||'-'}}</td><td>{{o.entrust_org}}</td><td>{{o.entruster}}</td>
           <td>{{o.sample_name}} ×{{o.sample_count}}</td><td>{{o.test_item}}</td><td v-html="badge(o.status)"></td><td>{{ o.status === '已否决' ? o.reject_reason : '' }}</td><td>{{fmtD(o.created_at)}}</td>
-          <td>
+          <td v-if="isAdmin()">
             <button class="btn sm" v-if="canEdit(o)" @click="openEdit(o)">修改</button>
             <button class="btn danger sm" v-if="canEdit(o)" @click="remove(o)">删除</button>
           </td>
         </tr>
-        <tr v-if="!all.length"><td colspan="10" class="empty">暂无数据</td></tr>
+        <tr v-if="!all.length"><td :colspan="isAdmin() ? 10 : 9" class="empty">暂无数据</td></tr>
       </tbody></table>
     </div>
   </div>
@@ -506,6 +759,7 @@ const OrderQuery = {
         <div class="form-group"><label>要求完成时间</label><input type="datetime-local" v-model="editForm.required_start"></div>
       </div>
       <div class="form-group"><label>试验条件</label><textarea v-model="editForm.test_condition"></textarea></div>
+      <div class="form-group"><label>判定标准</label><textarea v-model="editForm.criteria"></textarea></div>
       <div class="form-group"><label>备注</label><textarea v-model="editForm.remark"></textarea></div>
       <div class="modal-actions">
         <button class="btn" @click="showEdit=false">取消</button>
@@ -573,6 +827,9 @@ const ReviewView = {
           <tr><td style="width:100px" class="lbl">委托单位</td><td>{{detail.entrust_org}}</td><td style="width:80px" class="lbl">委托人</td><td>{{detail.entruster}}</td></tr>
           <tr><td class="lbl">样品</td><td>{{detail.sample_name}} / {{detail.sample_model}} ×{{detail.sample_count}}{{detail.sample_unit}}</td><td class="lbl">检测项目</td><td>{{detail.test_item}}</td></tr>
           <tr><td class="lbl">检测依据</td><td colspan="3">{{detail.test_basis || '客户自定义条件'}}</td></tr>
+          <tr v-if="detail.test_condition"><td class="lbl">试验条件</td><td colspan="3" style="white-space:pre-wrap">{{detail.test_condition}}</td></tr>
+          <tr v-if="detail.criteria"><td class="lbl">判定标准</td><td colspan="3" style="white-space:pre-wrap">{{detail.criteria}}</td></tr>
+          <tr v-if="detail.case_images && detail.case_images.length"><td class="lbl">用例图片</td><td colspan="3"><div class="img-thumbs"><a v-for="im in detail.case_images" :key="im.id" :href="im.path" target="_blank" :title="im.filename"><img :src="im.path" :alt="im.filename"></a></div></td></tr>
           <tr><td class="lbl">联系电话</td><td>{{detail.phone}}</td><td class="lbl">要求时间</td><td>{{fmtDT(detail.required_start)}}</td></tr>
         </tbody></table>
 
@@ -642,11 +899,11 @@ function code39(text) {
 function printSampleLabels(order, samples) {
   const labels = samples.map(s => `
     <div class="label">
-      <div class="lbl-head">${order.entrust_org || '&nbsp;'}</div>
+      <div class="lbl-head">${escHtml(order.entrust_org) || '&nbsp;'}</div>
       <div class="barcode">${code39(s.sample_no)}</div>
-      <div class="code">${s.sample_no}</div>
-      <div class="info">${order.sample_name || ''}${order.sample_model ? ' / ' + order.sample_model : ''}</div>
-      <div class="info">状况：${s.condition || '-'}　状态：${s.status}</div>
+      <div class="code">${escHtml(s.sample_no)}</div>
+      <div class="info">${escHtml(order.sample_name)}${order.sample_model ? ' / ' + escHtml(order.sample_model) : ''}</div>
+      <div class="info">状况：${escHtml(s.condition) || '-'}　状态：${escHtml(s.status)}</div>
     </div>`).join('');
   const w = window.open('', '_blank', 'width=720,height=820');
   w.document.write(`<html><head><meta charset="utf-8"><title>样品标签/领出单</title><style>
@@ -661,7 +918,7 @@ function printSampleLabels(order, samples) {
     @media print{body{padding:0}}
   </style></head><body>
     <div class="checkout"><h3>样品领出单</h3>
-      <p>实验编号：${order.experiment_no || order.order_no}　委托单位：${order.entrust_org || '-'}　样品名称：${order.sample_name || '-'}</p>
+      <p>实验编号：${escHtml(order.experiment_no || order.order_no)}　委托单位：${escHtml(order.entrust_org) || '-'}　样品名称：${escHtml(order.sample_name) || '-'}</p>
       <p>领出人签字：＿＿＿＿＿＿　　/　　接收人签字：＿＿＿＿＿＿　　/　　日期：＿＿＿＿年＿＿月＿＿日</p>
     </div>
     <div class="labels">${labels}</div>
@@ -1425,7 +1682,7 @@ const RootApp = {
   components: {
     LoginPage, PublicPage, MainLayout, Dashboard, OrderNew, OrderQuery, ReviewView,
     SamplesView, ScheduleView, ExperimentView, ReportsView, EquipmentView, BoardsView, HandoverView, UsersView,
-    StatisticsView, AuditLogView, CustomersView,
+    StatisticsView, AuditLogView, CustomersView, TestCaseLibrary,
   },
   data: () => ({ allEq: [], reviewId: null }),
   computed: {
@@ -1446,7 +1703,7 @@ const RootApp = {
 };
 
 /* ---------------- 路由 ---------------- */
-const routes = ['/dashboard', '/orders/new', '/orders/query', '/review', '/samples', '/schedule', '/experiment', '/reports', '/equipment', '/boards', '/handover', '/statistics', '/customers', '/audit', '/users'];
+const routes = ['/dashboard', '/orders/new', '/orders/query', '/review', '/samples', '/schedule', '/experiment', '/reports', '/equipment', '/boards', '/handover', '/statistics', '/customers', '/audit', '/users', '/cases'];
 function applyRoute() {
   const h = location.hash.slice(1);
   const home = homeRoute(state.role);
@@ -1469,6 +1726,7 @@ const _components = {
   'experiment-view': ExperimentView, 'reports-view': ReportsView, 'equipment-view': EquipmentView,
   'boards-view': BoardsView, 'handover-view': HandoverView, 'users-view': UsersView,
   'statistics-view': StatisticsView, 'customers-view': CustomersView, 'audit-view': AuditLogView,
+  'testcase-library': TestCaseLibrary,
 };
 Object.entries(_components).forEach(([name, comp]) => app.component(name, comp));
 

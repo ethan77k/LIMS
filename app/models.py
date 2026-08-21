@@ -45,6 +45,8 @@ class EntrustOrder(Base):
     entrust_org: Mapped[str] = mapped_column(String(128), default="")      # 委托单位
     entrust_org_en: Mapped[str] = mapped_column(String(128), default="")
     entruster: Mapped[str] = mapped_column(String(64), default="")         # 委托人
+    entruster_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)  # 绑定委托人账号（同名隔离）
+    case_id: Mapped[int | None] = mapped_column(ForeignKey("test_cases.id"), nullable=True)  # 来源用例（从用例库勾选生成时）
     entruster_en: Mapped[str] = mapped_column(String(64), default="")
     sample_name: Mapped[str] = mapped_column(String(128), default="")      # 样品名称
     sample_name_en: Mapped[str] = mapped_column(String(128), default="")
@@ -73,6 +75,7 @@ class EntrustOrder(Base):
     storage_require: Mapped[str] = mapped_column(String(64), default="常温存放")
     sample_dispose: Mapped[str] = mapped_column(String(16), default="退还")    # 样品处理：退还/报废/留存
     test_condition: Mapped[str] = mapped_column(Text, default="")            # 试验条件
+    criteria: Mapped[str] = mapped_column(Text, default="")                  # 判定标准
     remark: Mapped[str] = mapped_column(Text, default="")                    # 备注
 
     required_start: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)  # 要求开始时间
@@ -91,6 +94,7 @@ class EntrustOrder(Base):
     samples: Mapped[list["Sample"]] = relationship("Sample", back_populates="order", cascade="all, delete-orphan")
     schedules: Mapped[list["Schedule"]] = relationship("Schedule", back_populates="order", cascade="all, delete-orphan")
     costs: Mapped[list["CostItem"]] = relationship("CostItem", back_populates="order", cascade="all, delete-orphan")
+    case: Mapped["TestCase | None"] = relationship("TestCase", foreign_keys=[case_id])
 
 
 # ---------------------------------------------------------------------------
@@ -305,4 +309,50 @@ class Report(Base):
     issuer_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     issuer: Mapped["User | None"] = relationship("User", foreign_keys=[issuer_id])
     issued_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+
+
+# ---------------------------------------------------------------------------
+# 测试用例库（委托人维护，全实验室共享）
+# ---------------------------------------------------------------------------
+class TestCaseGroup(Base):
+    __tablename__ = "test_case_groups"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    name: Mapped[str] = mapped_column(String(128), index=True)   # 客户名 / 分组名
+    remark: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+
+    cases: Mapped[list["TestCase"]] = relationship(
+        "TestCase", back_populates="group", cascade="all, delete-orphan")
+
+
+class TestCase(Base):
+    __tablename__ = "test_cases"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    group_id: Mapped[int] = mapped_column(ForeignKey("test_case_groups.id"), index=True)
+    group: Mapped["TestCaseGroup"] = relationship("TestCaseGroup", back_populates="cases")
+
+    test_item: Mapped[str] = mapped_column(String(128), default="")      # 检测项目
+    test_condition: Mapped[str] = mapped_column(Text, default="")        # 试验条件
+    criteria: Mapped[str] = mapped_column(Text, default="")              # 判定标准
+    count: Mapped[int] = mapped_column(Integer, default=1)               # 数量
+    unit: Mapped[str] = mapped_column(String(16), default="只")           # 单位
+    remark: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    images: Mapped[list["TestCaseImage"]] = relationship(
+        "TestCaseImage", back_populates="case", cascade="all, delete-orphan")
+
+
+class TestCaseImage(Base):
+    __tablename__ = "test_case_images"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    case_id: Mapped[int] = mapped_column(ForeignKey("test_cases.id"), index=True)
+    case: Mapped["TestCase"] = relationship("TestCase", back_populates="images")
+    filename: Mapped[str] = mapped_column(String(256), default="")   # 原始文件名
+    path: Mapped[str] = mapped_column(String(512), default="")       # 相对访问路径 /uploads/cases/xxx
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)

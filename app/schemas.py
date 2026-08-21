@@ -85,8 +85,10 @@ class OrderCreate(BaseModel):
     storage_require: str = "常温存放"
     sample_dispose: str = "退还"
     test_condition: str = ""
+    criteria: str = ""
     remark: str = ""
     required_start: datetime | None = None
+    case_id: int | None = None
 
 
 class OrderUpdate(BaseModel):
@@ -116,6 +118,7 @@ class OrderUpdate(BaseModel):
     storage_require: str | None = None
     sample_dispose: str | None = None
     test_condition: str | None = None
+    criteria: str | None = None
     remark: str | None = None
     required_start: datetime | None = None
 
@@ -196,6 +199,7 @@ class OrderOut(BaseModel):
     storage_require: str
     sample_dispose: str
     test_condition: str
+    criteria: str
     remark: str
     required_start: datetime | None
     created_at: datetime
@@ -393,3 +397,36 @@ class CustomerUpdate(BaseModel):
 class ReportIssueRequest(BaseModel):
     report_type: str = "检测报告"      # 委托记录单 / 检测报告
     version: str = "常规"              # 常规 / 检测（检测报告用）
+
+
+# ---------------------------------------------------------------------------
+# 测试用例库
+# ---------------------------------------------------------------------------
+class TestCaseGroupCreate(BaseModel):
+    name: str
+    remark: str = ""
+
+
+class TestCaseGroupUpdate(BaseModel):
+    name: str | None = None
+    remark: str | None = None
+
+
+class TestCaseCreate(BaseModel):
+    group_id: int
+    test_item: str = ""
+    test_condition: str = ""
+    criteria: str = ""
+    count: int = 1
+    unit: str = "只"
+    remark: str = ""
+
+
+class TestCaseUpdate(BaseModel):
+    group_id: int | None = None
+    test_item: str | None = None
+    test_condition: str | None = None
+    criteria: str | None = None
+    count: int | None = None
+    unit: str | None = None
+    remark: str | None = None

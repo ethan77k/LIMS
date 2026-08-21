@@ -58,16 +58,21 @@ def order_to_dict(o, with_detail=True) -> dict:
         "phone": o.phone, "email": o.email, "tracker": o.tracker, "tracker_email": o.tracker_email,
         "test_reason": o.test_reason, "report_lang": o.report_lang,
         "sample_status": o.sample_status, "storage_require": o.storage_require,
-        "sample_dispose": o.sample_dispose, "test_condition": o.test_condition, "remark": o.remark,
+        "sample_dispose": o.sample_dispose, "test_condition": o.test_condition,
+        "criteria": o.criteria, "remark": o.remark,
         "required_start": _dt(o.required_start), "created_at": _dt(o.created_at),
         "reviewer_id": o.reviewer_id, "review_at": _dt(o.review_at),
         "reject_reason": o.reject_reason, "total_cost": round(o.total_cost, 2),
-        "finish_at": _dt(o.finish_at),
+        "finish_at": _dt(o.finish_at), "case_id": o.case_id,
     }
     if with_detail:
         d["samples"] = [sample_to_dict(s) for s in sorted(o.samples, key=lambda x: x.id)]
         d["costs"] = [cost_to_dict(c) for c in sorted(o.costs, key=lambda x: x.id)]
         d["schedules"] = [schedule_to_dict(s) for s in sorted(o.schedules, key=lambda x: x.id)]
+        d["case_images"] = (
+            [case_image_to_dict(i) for i in sorted(o.case.images, key=lambda x: x.id)]
+            if o.case else []
+        )
     return d
 
 
@@ -125,3 +130,27 @@ def report_to_dict(r) -> dict:
         "sample_name": r.order.sample_name if r.order else "",
         "entrust_org": r.order.entrust_org if r.order else "",
     }
+
+
+def case_image_to_dict(img) -> dict:
+    return {"id": img.id, "case_id": img.case_id, "filename": img.filename, "path": img.path}
+
+
+def case_to_dict(c) -> dict:
+    return {
+        "id": c.id, "group_id": c.group_id, "group_name": c.group.name if c.group else "",
+        "test_item": c.test_item, "test_condition": c.test_condition, "criteria": c.criteria,
+        "count": c.count, "unit": c.unit,
+        "remark": c.remark, "created_at": _dt(c.created_at), "updated_at": _dt(c.updated_at),
+        "images": [case_image_to_dict(i) for i in sorted(c.images, key=lambda x: x.id)],
+    }
+
+
+def case_group_to_dict(g, with_cases: bool = False) -> dict:
+    d = {
+        "id": g.id, "name": g.name, "remark": g.remark, "created_at": _dt(g.created_at),
+        "case_count": len(g.cases),
+    }
+    if with_cases:
+        d["cases"] = [case_to_dict(c) for c in sorted(g.cases, key=lambda x: x.id)]
+    return d

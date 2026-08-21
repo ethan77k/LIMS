@@ -8,9 +8,28 @@
 from datetime import datetime
 
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .models import EntrustOrder, Report, Sample
+
+
+def retry_on_number_conflict(db: Session, fn, attempts: int = 3):
+    """编号唯一冲突时回滚重试（并发 MAX+1 撞号兜底）。
+
+    fn 内应完成所有 db.add/flush 并返回新对象；本函数负责 commit。
+    撞号时回滚后重新调用 fn（重新取号），最多 attempts 次。
+    """
+    for i in range(attempts):
+        try:
+            result = fn()
+            db.commit()
+            return result
+        except IntegrityError:
+            db.rollback()
+            if i == attempts - 1:
+                raise
+    raise RuntimeError("unreachable")  # pragma: no cover
 
 
 def _next_sequence(db: Session, prefix: str, model, field, width: int) -> str:
@@ -40,21 +59,25 @@ def next_experiment_no(db: Session) -> str:
     return _next_sequence(db, prefix, EntrustOrder, "experiment_no", 3)
 
 
-def next_sample_no(db: Session, experiment_no: str, existing_count: int) -> str:
-    """样品编号 = 实验编号 + '-' + 两位流水（全局按实验编号计数）。"""
-    prefix = experiment_no
+def max_sample_seq(db: Session, experiment_no: str) -> int:
+    """该实验编号下已使用的最大两位流水（无则 0）。"""
     row = (
         db.query(func.max(Sample.sample_no))
-        .filter(Sample.sample_no.like(f"{prefix}-%"))
+        .filter(Sample.sample_no.like(f"{experiment_no}-%"))
         .scalar()
     )
-    current = existing_count
-    if row:
-        try:
-            current = max(current, int(row.rsplit("-", 1)[1]))
-        except (ValueError, IndexError):
-            pass
-    return f"{prefix}-{current + 1:02d}"
+    if not row:
+        return 0
+    try:
+        return int(row.rsplit("-", 1)[1])
+    except (ValueError, IndexError):
+        return 0
+
+
+def next_sample_no(db: Session, experiment_no: str, existing_count: int) -> str:
+    """样品编号 = 实验编号 + '-' + 两位流水（全局按实验编号计数）。"""
+    current = max(existing_count, max_sample_seq(db, experiment_no))
+    return f"{experiment_no}-{current + 1:02d}"
 
 
 def next_report_no(db: Session) -> str:

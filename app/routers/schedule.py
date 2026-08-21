@@ -78,10 +78,29 @@ def delete_schedule(
     schedule = db.get(Schedule, schedule_id)
     if schedule is None:
         raise HTTPException(404, "排期计划不存在")
-    if schedule.status == "已完成":
-        raise HTTPException(400, "已完成的排期不可删除")
+    if schedule.status != "已排期":
+        raise HTTPException(400, "仅「已排期」的排期可删除")
+    sample_id = schedule.sample_id
+    order_id = schedule.order_id
     log(db, user, "删除排期", "schedule", schedule.id, schedule.sample.sample_no if schedule.sample else "")
     db.delete(schedule)
-    db.add(SampleOperation(sample_id=schedule.sample_id, action="删除排期", operator=user.name))
+    db.flush()  # autoflush=False，需显式 flush 让后续 count 反映删除
+
+    # 样品：若无剩余排期，回退「已排期」→「已接收」
+    sample = db.get(Sample, sample_id)
+    if sample is not None and sample.status == "已排期":
+        remaining = db.query(Schedule).filter(Schedule.sample_id == sample_id).count()
+        if remaining == 0:
+            sample.status = "已接收"
+            db.add(SampleOperation(sample_id=sample_id, action="取消排期", operator=user.name, remark="排期已删除，样品回退已接收"))
+    db.add(SampleOperation(sample_id=sample_id, action="删除排期", operator=user.name))
+
+    # 委托单：若再无任何排期，回退「已排期」→「已审核」
+    order = db.get(EntrustOrder, order_id)
+    if order is not None and order.status == "已排期":
+        remaining = db.query(Schedule).filter(Schedule.order_id == order_id).count()
+        if remaining == 0:
+            order.status = "已审核"
+
     db.commit()
     return {"message": "删除成功"}

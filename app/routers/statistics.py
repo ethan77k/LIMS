@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import and_, func, or_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from ..database import get_db
 from ..deps import require_roles
@@ -16,20 +16,34 @@ router = APIRouter(prefix="/api/statistics", tags=["statistics"])
 
 @router.get("/overview")
 def overview(db: Session = Depends(get_db), _: User = Depends(require_roles("admin", "experimenter"))):
-    finished = db.query(EntrustOrder).filter(EntrustOrder.status == "已完成").all()
-    total_cost = sum(o.total_cost or 0 for o in finished)
-    cycles = [(o.finish_at - o.created_at).total_seconds() / 86400 for o in finished if o.finish_at]
+    # 一次 group_by 统计各状态数量，替代多次 count
+    status_counts = dict(
+        db.query(EntrustOrder.status, func.count(EntrustOrder.id))
+        .group_by(EntrustOrder.status)
+        .all()
+    )
+    total_cost = (
+        db.query(func.sum(EntrustOrder.total_cost))
+        .filter(EntrustOrder.status == "已完成")
+        .scalar()
+    ) or 0
+    finished_rows = (
+        db.query(EntrustOrder.created_at, EntrustOrder.finish_at)
+        .filter(EntrustOrder.status == "已完成", EntrustOrder.finish_at.isnot(None))
+        .all()
+    )
+    cycles = [(f - c).total_seconds() / 86400 for c, f in finished_rows if f]
     avg_cycle = round(sum(cycles) / len(cycles), 1) if cycles else 0
     return {
-        "total_orders": db.query(EntrustOrder).count(),
-        "pending_review": db.query(EntrustOrder).filter(EntrustOrder.status == "待审核").count(),
-        "in_progress": db.query(EntrustOrder).filter(EntrustOrder.status.in_(["已审核", "已排期", "实验中"])).count(),
-        "finished": len(finished),
-        "rejected": db.query(EntrustOrder).filter(EntrustOrder.status == "已否决").count(),
+        "total_orders": sum(status_counts.values()),
+        "pending_review": status_counts.get("待审核", 0),
+        "in_progress": sum(status_counts.get(k, 0) for k in ("已审核", "已排期", "实验中")),
+        "finished": status_counts.get("已完成", 0),
+        "rejected": status_counts.get("已否决", 0),
         "total_cost": round(total_cost, 2),
         "avg_cycle": avg_cycle,
-        "total_samples": db.query(Sample).count(),
-        "total_equipment": db.query(Equipment).count(),
+        "total_samples": db.query(func.count(Sample.id)).scalar() or 0,
+        "total_equipment": db.query(func.count(Equipment.id)).scalar() or 0,
     }
 
 
@@ -70,7 +84,7 @@ def cost(db: Session = Depends(get_db), _: User = Depends(require_roles("admin",
 
 @router.get("/equipment-usage")
 def equipment_usage(db: Session = Depends(get_db), _: User = Depends(require_roles("admin", "experimenter"))):
-    rows = db.query(Schedule).all()
+    rows = db.query(Schedule).options(selectinload(Schedule.equipment)).all()
     by_eq: dict[str, dict] = defaultdict(lambda: {"hours": 0.0, "count": 0, "finished": 0})
     for s in rows:
         name = s.equipment.name if s.equipment else "未知设备"
@@ -87,7 +101,12 @@ def equipment_usage(db: Session = Depends(get_db), _: User = Depends(require_rol
 
 @router.get("/workload")
 def workload(db: Session = Depends(get_db), _: User = Depends(require_roles("admin", "experimenter"))):
-    orders = db.query(EntrustOrder).filter(EntrustOrder.reviewer_id.isnot(None)).all()
+    orders = (
+        db.query(EntrustOrder)
+        .options(selectinload(EntrustOrder.reviewer))
+        .filter(EntrustOrder.reviewer_id.isnot(None))
+        .all()
+    )
     by_person: dict[str, dict] = defaultdict(lambda: {"orders": 0, "samples": 0, "finished": 0})
     for o in orders:
         name = o.reviewer.name if o.reviewer else "未知"

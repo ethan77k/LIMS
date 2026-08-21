@@ -2,7 +2,7 @@
 from datetime import datetime
 
 from fastapi import APIRouter, Depends
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from ..database import get_db
 from ..deps import require_roles
@@ -47,6 +47,7 @@ def boards(db: Session = Depends(get_db), _: User = Depends(require_roles("admin
     # 待试验展板：已审核/已排期的委托单，附设备清单与计划时间
     waiting_orders = (
         db.query(EntrustOrder)
+        .options(selectinload(EntrustOrder.schedules).selectinload(Schedule.equipment))
         .filter(EntrustOrder.status.in_(["已审核", "已排期"]))
         .order_by(EntrustOrder.id)
         .all()
@@ -69,7 +70,12 @@ def boards(db: Session = Depends(get_db), _: User = Depends(require_roles("admin
         waiting.append(d)
 
     # 设备使用明细：正在实验中的排期
-    in_use = db.query(Schedule).filter(Schedule.status == "实验中").all()
+    in_use = (
+        db.query(Schedule)
+        .options(selectinload(Schedule.equipment), selectinload(Schedule.order), selectinload(Schedule.sample))
+        .filter(Schedule.status == "实验中")
+        .all()
+    )
     usage = []
     for s in in_use:
         usage.append({
@@ -81,7 +87,13 @@ def boards(db: Session = Depends(get_db), _: User = Depends(require_roles("admin
         })
 
     # 设备排期展板：已排期（待开始）的排期
-    upcoming = db.query(Schedule).filter(Schedule.status == "已排期").order_by(Schedule.plan_start).all()
+    upcoming = (
+        db.query(Schedule)
+        .options(selectinload(Schedule.equipment), selectinload(Schedule.order), selectinload(Schedule.sample))
+        .filter(Schedule.status == "已排期")
+        .order_by(Schedule.plan_start)
+        .all()
+    )
     schedule_board = []
     for s in upcoming:
         schedule_board.append({

@@ -16,6 +16,9 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 12  # 12 小时
 # 静态文件目录
 STATIC_DIR = BASE_DIR / "static"
 
+# 上传文件目录（测试用例图片等，位于 static 下便于直接访问）
+UPLOAD_DIR = STATIC_DIR / "uploads"
+
 # 报告抬头：公司名（用于文字显示）与 LOGO 路径
 COMPANY_NAME = os.getenv("LIMS_COMPANY_NAME", "得辉达集团")
 COMPANY_NAME_EN = os.getenv("LIMS_COMPANY_NAME_EN", "")

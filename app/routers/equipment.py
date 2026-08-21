@@ -86,6 +86,25 @@ def stop_equipment(eq_id: int, db: Session = Depends(get_db), user: User = Depen
 # ---------------------------------------------------------------------------
 # 校准 / 维保记录
 # ---------------------------------------------------------------------------
+def _sync_calibration_valid_to(db: Session, equipment_id: int) -> None:
+    """取该设备最新一条「校准」记录的 next_date 同步到设备 valid_to（无则置 None）。"""
+    db.flush()  # 让本次新增/修改/删除的维保记录先落库，查询才反映最新状态
+    eq = db.get(Equipment, equipment_id)
+    if eq is None:
+        return
+    latest = (
+        db.query(EquipmentMaintenance)
+        .filter(
+            EquipmentMaintenance.equipment_id == equipment_id,
+            EquipmentMaintenance.type == "校准",
+            EquipmentMaintenance.next_date.isnot(None),
+        )
+        .order_by(EquipmentMaintenance.id.desc())
+        .first()
+    )
+    eq.valid_to = latest.next_date if latest else None
+
+
 @router.get("/{eq_id}/maintenance")
 def list_maintenance(eq_id: int, db: Session = Depends(get_db), _: User = Depends(require_roles("admin", "experimenter"))):
     rows = db.query(EquipmentMaintenance).filter(EquipmentMaintenance.equipment_id == eq_id).order_by(EquipmentMaintenance.id.desc()).all()
@@ -99,9 +118,7 @@ def create_maintenance(eq_id: int, data: MaintenanceCreate, db: Session = Depend
         raise HTTPException(404, "设备不存在")
     m = EquipmentMaintenance(equipment_id=eq_id, **data.model_dump())
     db.add(m)
-    # 校准记录同步设备校准有效期
-    if data.type == "校准" and data.next_date:
-        eq.valid_to = data.next_date
+    _sync_calibration_valid_to(db, eq_id)
     log(db, user, f"设备{data.type}", "equipment", eq.id, eq.name)
     db.commit()
     db.refresh(m)
@@ -115,6 +132,7 @@ def update_maintenance(mid: int, data: MaintenanceUpdate, db: Session = Depends(
         raise HTTPException(404, "维保记录不存在")
     for field, value in data.model_dump(exclude_unset=True).items():
         setattr(m, field, value)
+    _sync_calibration_valid_to(db, m.equipment_id)
     log(db, user, "修改维保记录", "equipment", m.equipment_id, m.type)
     db.commit()
     return maintenance_to_dict(m)
@@ -125,8 +143,10 @@ def delete_maintenance(mid: int, db: Session = Depends(get_db), user: User = Dep
     m = db.get(EquipmentMaintenance, mid)
     if m is None:
         raise HTTPException(404, "维保记录不存在")
+    eq_id = m.equipment_id
     log(db, user, "删除维保记录", "equipment", m.equipment_id, m.type)
     db.delete(m)
+    _sync_calibration_valid_to(db, eq_id)
     db.commit()
     return {"message": "删除成功"}
 

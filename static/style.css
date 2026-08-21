@@ -144,3 +144,18 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
 
 /* ---------- 分页 ---------- */
 .pager { display: flex; align-items: center; gap: 12px; justify-content: center; margin-top: 14px; color: var(--muted); }
+
+/* ---------- 用例库勾选列表 ---------- */
+.case-check-list { display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow-y: auto;
+  border: 1px solid var(--border); border-radius: 6px; padding: 8px; background: #fff; }
+.case-check { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 5px;
+  cursor: pointer; font-size: 13px; }
+.case-check:hover { background: #f5f7fa; }
+.case-check.checked { background: #e6f4ea; }
+.case-check input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; flex: 0 0 16px; }
+.case-check-name { font-weight: 600; }
+.case-check-hint { color: var(--muted); font-size: 12px; }
+.img-thumbs { display: flex; flex-wrap: wrap; gap: 8px; }
+.img-thumbs img { width: 72px; height: 72px; object-fit: cover; border: 1px solid var(--border);
+  border-radius: 4px; cursor: pointer; background: #f5f7fa; }
+.img-thumbs img:hover { border-color: var(--primary); }

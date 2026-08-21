@@ -4,14 +4,14 @@
 """
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import or_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from ..audit import field_diff, log
 from ..database import get_db
 from ..deps import get_current_user, get_current_user_optional, require_roles
-from ..models import EntrustOrder, User
+from ..models import EntrustOrder, Notification, Sample, Schedule, TestCase, User
 from ..notify import notify
-from ..numbering import next_order_no
+from ..numbering import next_order_no, retry_on_number_conflict
 from ..schemas import OrderCreate, OrderUpdate
 from ..serializers import order_to_dict
 
@@ -54,13 +54,18 @@ def create_order(
     if int(values.get("sample_count") or 0) < 1:
         raise HTTPException(400, "样品数量至少为 1")
 
-    order = EntrustOrder(**values, order_no=next_order_no(db))
-    db.add(order)
-    db.flush()
-    log(db, None, "委托申请", "order", order.id, f"{order.order_no} {order.sample_name}")
-    notify(db, "新委托待审核", f"{order.order_no} {order.sample_name}（{order.entrust_org}）", role="admin", order_id=order.id)
-    notify(db, "新委托待审核", f"{order.order_no} {order.sample_name}（{order.entrust_org}）", role="experimenter", order_id=order.id)
-    db.commit()
+    def _do():
+        order = EntrustOrder(**values, order_no=next_order_no(db))
+        if user is not None and user.role == "entruster":
+            order.entruster_user_id = user.id
+        db.add(order)
+        db.flush()
+        log(db, None, "委托申请", "order", order.id, f"{order.order_no} {order.sample_name}")
+        notify(db, "新委托待审核", f"{order.order_no} {order.sample_name}（{order.entrust_org}）", role="admin", order_id=order.id)
+        notify(db, "新委托待审核", f"{order.order_no} {order.sample_name}（{order.entrust_org}）", role="experimenter", order_id=order.id)
+        return order
+
+    order = retry_on_number_conflict(db, _do)
     db.refresh(order)
     return {"id": order.id, "order_no": order.order_no, "message": "委托申请提交成功"}
 
@@ -71,11 +76,16 @@ def list_orders(
     user: User = Depends(require_roles("admin", "experimenter", "entruster")),
     status: str | None = Query(None),
     keyword: str | None = Query(None),
+    page: int | None = Query(None, ge=1),
+    size: int | None = Query(None, ge=1, le=500),
 ):
     q = db.query(EntrustOrder)
-    # 委托人只能看到自己名下（委托人姓名匹配）的委托单
+    # 委托人只能看到自己名下的委托单：优先按账号 id 隔离，历史无 id 数据按姓名兜底
     if user.role == "entruster":
-        q = q.filter(EntrustOrder.entruster == user.name)
+        q = q.filter(or_(
+            EntrustOrder.entruster_user_id == user.id,
+            EntrustOrder.entruster == user.name,
+        ))
     if status:
         q = q.filter(EntrustOrder.status == status)
     if keyword:
@@ -88,8 +98,14 @@ def list_orders(
             EntrustOrder.sample_model.like(like),
             EntrustOrder.sample_name.like(like),
         ))
-    orders = q.order_by(EntrustOrder.id.desc()).all()
-    return [order_to_dict(o, with_detail=False) for o in orders]
+    # 未传 page 时保持返回数组（兼容旧前端）；传 page 时返回分页结构
+    if page is None:
+        orders = q.order_by(EntrustOrder.id.desc()).all()
+        return [order_to_dict(o, with_detail=False) for o in orders]
+    size = size or 20
+    total = q.count()
+    rows = q.order_by(EntrustOrder.id.desc()).offset((page - 1) * size).limit(size).all()
+    return {"total": total, "page": page, "size": size, "items": [order_to_dict(o, with_detail=False) for o in rows]}
 
 
 @router.get("/query")
@@ -112,15 +128,30 @@ def public_query(
 
 @router.get("/{order_id}")
 def get_order(order_id: int, db: Session = Depends(get_db), _: User = Depends(require_roles("admin", "experimenter"))):
-    return order_to_dict(_get_order(db, order_id))
+    order = (
+        db.query(EntrustOrder)
+        .options(
+            selectinload(EntrustOrder.samples).selectinload(Sample.operations),
+            selectinload(EntrustOrder.schedules).selectinload(Schedule.sample),
+            selectinload(EntrustOrder.schedules).selectinload(Schedule.equipment),
+            selectinload(EntrustOrder.costs),
+            selectinload(EntrustOrder.reviewer),
+            selectinload(EntrustOrder.case).selectinload(TestCase.images),
+        )
+        .filter(EntrustOrder.id == order_id)
+        .first()
+    )
+    if order is None:
+        raise HTTPException(404, "委托单不存在")
+    return order_to_dict(order)
 
 
 def _check_editable(order: EntrustOrder, user: User) -> None:
-    """校验修改/删除权限：仅待审核可改，且委托人只能操作本人委托单。"""
+    """校验修改/删除权限：仅管理员可操作，且仅未审核的委托单可改。"""
+    if user.role != "admin":
+        raise HTTPException(403, "仅管理员可修改/删除委托单")
     if order.status != "待审核":
         raise HTTPException(400, "仅未审核的委托单可修改/删除")
-    if user.role == "entruster" and order.entruster != user.name:
-        raise HTTPException(403, "只能修改/删除本人名下的委托单")
 
 
 @router.put("/{order_id}")
@@ -142,6 +173,8 @@ def delete_order(order_id: int, db: Session = Depends(get_db), user: User = Depe
     order = _get_order(db, order_id)
     _check_editable(order, user)
     log(db, user, "删除委托", "order", order.id, order.order_no)
+    # 先清掉指向该委托单的通知，避免外键约束导致删除失败
+    db.query(Notification).filter(Notification.order_id == order.id).delete(synchronize_session=False)
     db.delete(order)
     db.commit()
     return {"message": "删除成功"}

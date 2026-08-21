@@ -3,8 +3,10 @@
 设备计价标准来源于公司内部《可靠性测试报价表-20260721.xlsx》
 （计费标准 + 计费明细 两个 Sheet 合并）。
 """
+from sqlalchemy import text
+
 from .database import Base, SessionLocal, engine
-from .models import Equipment, Notification, User
+from .models import EntrustOrder, Equipment, Notification, User
 from .security import hash_password
 
 
@@ -15,6 +17,10 @@ def init_db():
         _seed_users(db)
         _seed_equipment(db)
         _migrate_notifications(db)
+        _migrate_criteria(db)
+        _migrate_case_count_unit(db)
+        _migrate_order_case_id(db)
+        _migrate_entruster_user_id(db)
         db.commit()
     finally:
         db.close()
@@ -37,6 +43,41 @@ def _migrate_notifications(db):
                 )
             )
         db.delete(n)
+
+
+def _migrate_entruster_user_id(db):
+    """为 entrust_orders 增加 entruster_user_id 列并按委托人姓名回填（幂等）。"""
+    cols = [row[1] for row in db.execute(text("PRAGMA table_info(entrust_orders)"))]
+    if "entruster_user_id" not in cols:
+        db.execute(text("ALTER TABLE entrust_orders ADD COLUMN entruster_user_id INTEGER REFERENCES users(id)"))
+    for order in db.query(EntrustOrder).filter(EntrustOrder.entruster_user_id.is_(None)).all():
+        if order.entruster:
+            u = db.query(User).filter(User.name == order.entruster, User.role == "entruster").first()
+            if u is not None:
+                order.entruster_user_id = u.id
+
+
+def _migrate_criteria(db):
+    """为 entrust_orders 增加 criteria（判定标准）列（幂等）。"""
+    cols = [row[1] for row in db.execute(text("PRAGMA table_info(entrust_orders)"))]
+    if "criteria" not in cols:
+        db.execute(text("ALTER TABLE entrust_orders ADD COLUMN criteria TEXT DEFAULT ''"))
+
+
+def _migrate_case_count_unit(db):
+    """为 test_cases 增加 count（数量）/ unit（单位）列（幂等）。"""
+    cols = [row[1] for row in db.execute(text("PRAGMA table_info(test_cases)"))]
+    if "count" not in cols:
+        db.execute(text("ALTER TABLE test_cases ADD COLUMN count INTEGER DEFAULT 1"))
+    if "unit" not in cols:
+        db.execute(text("ALTER TABLE test_cases ADD COLUMN unit VARCHAR(16) DEFAULT '只'"))
+
+
+def _migrate_order_case_id(db):
+    """为 entrust_orders 增加 case_id 列（记录来源用例，审核时可带出图片）。幂等。"""
+    cols = [row[1] for row in db.execute(text("PRAGMA table_info(entrust_orders)"))]
+    if "case_id" not in cols:
+        db.execute(text("ALTER TABLE entrust_orders ADD COLUMN case_id INTEGER REFERENCES test_cases(id)"))
 
 
 def _seed_users(db):

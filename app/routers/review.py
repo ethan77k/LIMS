@@ -6,6 +6,7 @@
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..audit import log
@@ -13,7 +14,7 @@ from ..database import get_db
 from ..deps import require_roles
 from ..models import CostItem, EntrustOrder, Equipment, Sample, SampleOperation, User
 from ..notify import notify_entruster
-from ..numbering import next_experiment_no, next_sample_no
+from ..numbering import max_sample_seq, next_experiment_no
 from ..schemas import ReviewRequest
 from ..serializers import order_to_dict
 
@@ -49,17 +50,25 @@ def review_order(
         db.commit()
         return {"message": "已否决", "status": "已否决"}
 
-    # 通过
+    # 通过：校验动态选择的实验员（reviewer_id 指向有效实验员/管理员，否则 400）
+    selected_reviewer_id = reviewer.id
+    if data.reviewer_id is not None:
+        target = db.get(User, data.reviewer_id)
+        if target is None or target.role not in ("admin", "experimenter"):
+            raise HTTPException(400, "指定的实验员不存在或角色无效")
+        selected_reviewer_id = target.id
     order.experiment_no = next_experiment_no(db)
     order.status = "已审核"
-    order.reviewer_id = data.reviewer_id or reviewer.id
+    order.reviewer_id = selected_reviewer_id
     order.review_at = datetime.now()
     if data.required_start:
         order.required_start = data.required_start
 
-    # 生成样品
-    for i in range(order.sample_count):
-        sample_no = next_sample_no(db, order.experiment_no, i)
+    # 生成样品：一次性取该实验编号下最大流水，循环内自增（避免逐样品查库 O(n²)）
+    seq = max_sample_seq(db, order.experiment_no)
+    for _ in range(order.sample_count):
+        seq += 1
+        sample_no = f"{order.experiment_no}-{seq:02d}"
         sample = Sample(sample_no=sample_no, order_id=order.id, status="待接收", condition="未检查")
         db.add(sample)
 
@@ -95,7 +104,11 @@ def review_order(
 
     log(db, reviewer, "审核通过", "order", order.id, f"{order.experiment_no} 实验编号已分配")
     notify_entruster(db, order, "委托审核通过", f"{order.order_no} 已通过审核，实验编号 {order.experiment_no}")
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(400, "实验编号生成冲突，请重试审核")
     db.refresh(order)
     return {"message": "审核通过", "experiment_no": order.experiment_no}
 

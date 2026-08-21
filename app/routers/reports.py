@@ -1,9 +1,10 @@
 """报告生成：实验委托记录单 + 检测报告（HTML，浏览器打印即可导出 PDF）。"""
 import base64
+import html as _html
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import or_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from ..audit import log
 from ..config import COMPANY_NAME, COMPANY_NAME_EN, LOGO_PATH
@@ -11,7 +12,7 @@ from ..database import get_db
 from ..deps import require_roles
 from ..models import EntrustOrder, Report, User
 from ..notify import notify_entruster
-from ..numbering import next_report_no
+from ..numbering import next_report_no, retry_on_number_conflict
 from ..schemas import ReportIssueRequest
 from ..serializers import report_to_dict
 
@@ -55,7 +56,8 @@ def _report_head() -> str:
 
 
 def _fmt(v):
-    return v if v not in (None, "") else ""
+    """None/空串统一为 ""，并对 HTML 特殊字符转义（防存储型 XSS）。"""
+    return _html.escape(str(v)) if v not in (None, "") else ""
 
 
 def _dt_short(v):
@@ -159,7 +161,7 @@ def render_test_html(o: EntrustOrder, version: str = "常规") -> str:
 
 @router.get("/entrust/{order_id}", response_class=Response)
 def entrust_report(order_id: int, db: Session = Depends(get_db), _: User = Depends(require_roles("admin", "experimenter"))):
-    o = db.get(EntrustOrder, order_id)
+    o = db.get(EntrustOrder, order_id, options=[selectinload(EntrustOrder.samples), selectinload(EntrustOrder.reviewer)])
     if o is None:
         raise HTTPException(404, "委托单不存在")
     return Response(render_entrust_html(o), media_type="text/html")
@@ -172,7 +174,7 @@ def test_report(
     db: Session = Depends(get_db),
     _: User = Depends(require_roles("admin", "experimenter")),
 ):
-    o = db.get(EntrustOrder, order_id)
+    o = db.get(EntrustOrder, order_id, options=[selectinload(EntrustOrder.samples), selectinload(EntrustOrder.reviewer)])
     if o is None:
         raise HTTPException(404, "委托单不存在")
     return Response(render_test_html(o, version), media_type="text/html")
@@ -204,14 +206,18 @@ def issue_report(
     )
     if existing:
         return report_to_dict(existing)
-    r = Report(
-        order_id=order_id, report_no=next_report_no(db),
-        report_type=data.report_type, version=version, status="已签发", issuer_id=user.id,
-    )
-    db.add(r)
-    log(db, user, "签发报告", "report", None, f"{o.experiment_no or o.order_no} {data.report_type}")
-    notify_entruster(db, o, "报告已签发", f"{o.experiment_no or o.order_no} {o.sample_name} 的{data.report_type}已签发")
-    db.commit()
+
+    def _do():
+        r = Report(
+            order_id=order_id, report_no=next_report_no(db),
+            report_type=data.report_type, version=version, status="已签发", issuer_id=user.id,
+        )
+        db.add(r)
+        log(db, user, "签发报告", "report", None, f"{o.experiment_no or o.order_no} {data.report_type}")
+        notify_entruster(db, o, "报告已签发", f"{o.experiment_no or o.order_no} {o.sample_name} 的{data.report_type}已签发")
+        return r
+
+    r = retry_on_number_conflict(db, _do)
     db.refresh(r)
     return report_to_dict(r)
 
@@ -220,10 +226,16 @@ def issue_report(
 def archive(
     type: str | None = Query(None),
     keyword: str | None = Query(None),
+    page: int | None = Query(None, ge=1),
+    size: int | None = Query(None, ge=1, le=500),
     db: Session = Depends(get_db),
     _: User = Depends(require_roles("admin", "experimenter")),
 ):
-    q = db.query(Report).join(EntrustOrder, Report.order_id == EntrustOrder.id)
+    q = (
+        db.query(Report)
+        .options(selectinload(Report.order), selectinload(Report.issuer))
+        .join(EntrustOrder, Report.order_id == EntrustOrder.id)
+    )
     if type:
         q = q.filter(Report.report_type == type)
     if keyword:
@@ -235,8 +247,14 @@ def archive(
             EntrustOrder.sample_name.like(like),
             EntrustOrder.entrust_org.like(like),
         ))
-    rows = q.order_by(Report.id.desc()).all()
-    return [report_to_dict(r) for r in rows]
+    # 未传 page 时保持返回数组（兼容旧前端）；传 page 时返回分页结构
+    if page is None:
+        rows = q.order_by(Report.id.desc()).all()
+        return [report_to_dict(r) for r in rows]
+    size = size or 20
+    total = q.count()
+    rows = q.order_by(Report.id.desc()).offset((page - 1) * size).limit(size).all()
+    return {"total": total, "page": page, "size": size, "items": [report_to_dict(r) for r in rows]}
 
 
 @router.get("/archive/{report_id}/view", response_class=Response)
@@ -244,7 +262,7 @@ def archive_view(report_id: int, db: Session = Depends(get_db), _: User = Depend
     r = db.get(Report, report_id)
     if r is None:
         raise HTTPException(404, "报告不存在")
-    o = db.get(EntrustOrder, r.order_id)
+    o = db.get(EntrustOrder, r.order_id, options=[selectinload(EntrustOrder.samples), selectinload(EntrustOrder.reviewer)])
     if o is None:
         raise HTTPException(404, "委托单不存在")
     html = render_entrust_html(o) if r.report_type == "委托记录单" else render_test_html(o, r.version or "常规")

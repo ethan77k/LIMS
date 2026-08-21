@@ -16,6 +16,8 @@ router = APIRouter(prefix="/api/customers", tags=["customers"])
 @router.get("")
 def list_customers(
     keyword: str | None = Query(None),
+    page: int | None = Query(None, ge=1),
+    size: int | None = Query(None, ge=1, le=500),
     db: Session = Depends(get_db),
     _: User = Depends(require_roles("admin", "experimenter")),
 ):
@@ -23,7 +25,13 @@ def list_customers(
     if keyword:
         like = f"%{keyword}%"
         q = q.filter(or_(Customer.name.like(like), Customer.contact.like(like), Customer.phone.like(like)))
-    return [customer_to_dict(c) for c in q.order_by(Customer.id.desc()).all()]
+    # 未传 page 时保持返回数组（兼容旧前端）；传 page 时返回分页结构
+    if page is None:
+        return [customer_to_dict(c) for c in q.order_by(Customer.id.desc()).all()]
+    size = size or 20
+    total = q.count()
+    rows = q.order_by(Customer.id.desc()).offset((page - 1) * size).limit(size).all()
+    return {"total": total, "page": page, "size": size, "items": [customer_to_dict(c) for c in rows]}
 
 
 @router.post("")
