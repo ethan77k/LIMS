@@ -54,13 +54,13 @@ def export_orders(
 
     rows = [
         [o.order_no, o.experiment_no or "", o.status, o.entrust_org, o.entruster,
-         o.sample_name, o.sample_model, o.test_item, o.sample_count, o.total_cost,
+         o.sample_model, o.test_item, o.sample_count, o.total_cost,
          o.created_at.strftime("%Y-%m-%d %H:%M") if o.created_at else "",
          o.finish_at.strftime("%Y-%m-%d %H:%M") if o.finish_at else ""]
         for o in orders
     ]
     return _csv_response(
-        ["委托编号", "实验编号", "状态", "委托单位", "委托人", "样品名称", "样品型号", "检测项目", "样品数量", "试验成本", "委托时间", "完成时间"],
+        ["委托编号", "实验编号", "状态", "委托单位", "委托人", "样品型号", "检测项目", "样品数量", "试验成本", "委托时间", "完成时间"],
         rows, "orders",
     )
 
@@ -76,13 +76,13 @@ def export_samples(
         q = q.filter(Sample.status == status)
     samples = q.order_by(Sample.id.desc()).all()
     rows = [
-        [s.sample_no, s.order.experiment_no or s.order.order_no, s.order.sample_name,
+        [s.sample_no, s.order.experiment_no or s.order.order_no,
          s.status, s.condition, s.result or "", s.remark,
          s.created_at.strftime("%Y-%m-%d %H:%M") if s.created_at else ""]
         for s in samples
     ]
     return _csv_response(
-        ["样品编号", "实验编号", "样品名称", "状态", "状况", "结果", "备注", "创建时间"],
+        ["样品编号", "实验编号", "状态", "状况", "结果", "备注", "创建时间"],
         rows, "samples",
     )
 
@@ -95,12 +95,12 @@ def export_reports(
     reports = db.query(Report).join(EntrustOrder, Report.order_id == EntrustOrder.id).order_by(Report.id.desc()).all()
     rows = [
         [r.report_no, r.report_type, r.version or "", r.status,
-         r.order.experiment_no or r.order.order_no, r.order.sample_name,
+         r.order.experiment_no or r.order.order_no,
          r.issuer.name if r.issuer else "",
          r.issued_at.strftime("%Y-%m-%d %H:%M") if r.issued_at else ""]
         for r in reports
     ]
     return _csv_response(
-        ["报告编号", "报告类型", "版本", "状态", "实验编号", "样品名称", "签发人", "签发时间"],
+        ["报告编号", "报告类型", "版本", "状态", "实验编号", "签发人", "签发时间"],
         rows, "reports",
     )

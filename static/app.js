@@ -8,6 +8,7 @@ const state = reactive({
   name: localStorage.getItem('lims_name') || '',
   route: '/dashboard',
   toast: { msg: '', type: '' },
+  orderPrefill: null,
 });
 
 /* ---------------- 角色权限与默认首页 ---------------- */
@@ -323,7 +324,7 @@ const OrderNew = {
     async submit() {
       // 公共必填项（数量/单位仅手动方式需填写，勾选方式由用例带出）
       const required = [
-        ['entrust_org', '委托单位'], ['entruster', '委托人'], ['sample_name', '样品名称'],
+        ['entrust_org', '委托单位'], ['entruster', '委托人'],
         ['sample_model', 'DHD型号'], ['test_stage', '测试阶段'],
         ['phone', '联系电话'], ['email', 'DHD邮箱'], ['sample_dispose', '样品处理'],
       ];
@@ -362,6 +363,11 @@ const OrderNew = {
     },
   },
   async mounted() {
+    // 「复制实验委托申请」：带入委托查询里点击复制的内容
+    if (state.orderPrefill) {
+      this.form = { ...this.form, ...state.orderPrefill };
+      state.orderPrefill = null;
+    }
     // 登录的委托人：自动带出本人姓名，确保委托单与账号绑定
     if (state.token && state.role === 'entruster' && !this.form.entruster) {
       this.form.entruster = state.name;
@@ -411,13 +417,9 @@ const OrderNew = {
     </div>
     <div class="form-row">
       <div class="form-group"><label><span class="req">*</span>委托单位</label><select v-model="form.entrust_org"><option>音频研发中心</option><option>创新事业部</option><option>国内事业部</option><option>高端事业部</option><option>营销中心</option><option>供应链中心</option><option>工程质量中心</option></select></div>
-      <div class="form-group"><label>委托单位(英文)</label><input v-model="form.entrust_org_en"></div>
       <div class="form-group"><label><span class="req">*</span>委托人</label><input v-model="form.entruster"></div>
-      <div class="form-group"><label>委托人(英文)</label><input v-model="form.entruster_en"></div>
     </div>
     <div class="form-row">
-      <div class="form-group"><label><span class="req">*</span>样品名称</label><input v-model="form.sample_name"></div>
-      <div class="form-group"><label>样品名称(英文)</label><input v-model="form.sample_name_en"></div>
       <div class="form-group"><label><span class="req">*</span>DHD型号</label><input v-model="form.sample_model"></div>
       <div class="form-group"><label>客户型号</label><input v-model="form.customer_model"></div>
     </div>
@@ -429,16 +431,12 @@ const OrderNew = {
       <div class="form-group" v-if="mode==='manual'" style="flex:0 0 80px"><label><span class="req">*</span>单位</label><input v-model="form.sample_unit"></div>
     </div>
     <div class="form-row">
-      <div class="form-group"><label>检测依据</label><input v-model="form.test_basis" placeholder="没有则填客户自定义条件"></div>
-      <div class="form-group"><label>检测依据(英文)</label><input v-model="form.test_basis_en"></div>
       <div class="form-group"><label>试验原因</label><select v-model="form.test_reason"><option>例行试验</option><option>临时试验</option><option>委托试验</option></select></div>
       <div class="form-group"><label>报告要求</label><select v-model="form.report_lang"><option>中文</option><option>英文</option><option>中英双语</option></select></div>
     </div>
     <div class="form-row">
       <div class="form-group"><label><span class="req">*</span>联系电话</label><input v-model="form.phone"></div>
       <div class="form-group"><label><span class="req">*</span>DHD邮箱</label><input v-model="form.email"></div>
-      <div class="form-group"><label>跟踪人</label><input v-model="form.tracker"></div>
-      <div class="form-group"><label>跟踪人邮箱</label><input v-model="form.tracker_email" placeholder="多个用逗号/分号分隔"></div>
     </div>
     <div class="form-row">
       <div class="form-group"><label>样品状态</label><input v-model="form.sample_status"></div>
@@ -639,7 +637,7 @@ const TestCaseLibrary = {
 
 /* ---------------- 委托查询 ---------------- */
 const OrderQuery = {
-  data: () => ({ order_no: '', phone: '', list: [], status: '', keyword: '', all: [], showEdit: false, edit: null, editForm: {} }),
+  data: () => ({ order_no: '', phone: '', list: [], status: '', keyword: '', all: [], showEdit: false, edit: null, editForm: {}, detail: null }),
   methods: {
     async search() {
       if (!state.token) {
@@ -691,6 +689,29 @@ const OrderQuery = {
         toast('已删除', 'success'); this.search();
       } catch (e) { toast(e.message, 'error'); }
     },
+    openDetail(o) { this.detail = o; },
+    copyToNew() {
+      const o = this.detail;
+      if (!o) return;
+      state.orderPrefill = {
+        entrust_org: o.entrust_org || '', entrust_org_en: o.entrust_org_en || '',
+        entruster: o.entruster || '', entruster_en: o.entruster_en || '',
+        sample_name: o.sample_name || '', sample_name_en: o.sample_name_en || '',
+        test_item: o.test_item || '', test_item_en: o.test_item_en || '',
+        test_basis: o.test_basis || '', test_basis_en: o.test_basis_en || '',
+        test_stage: o.test_stage || '', sample_model: o.sample_model || '', customer_model: o.customer_model || '',
+        sample_count: o.sample_count != null ? o.sample_count : '', sample_unit: o.sample_unit || '',
+        phone: o.phone || '', email: o.email || '', tracker: o.tracker || '', tracker_email: o.tracker_email || '',
+        test_reason: o.test_reason || '例行试验', report_lang: o.report_lang || '中文',
+        sample_status: o.sample_status || '样品正常', storage_require: o.storage_require || '常温存放', sample_dispose: o.sample_dispose || '退还',
+        test_condition: o.test_condition || '', criteria: o.criteria || '', remark: o.remark || '',
+        required_start: o.required_start ? String(o.required_start).slice(0, 16) : '',
+        case_id: null,
+      };
+      this.detail = null;
+      navigate('/orders/new');
+      toast('已复制到「委托申请」，请核对后提交', 'success');
+    },
     badge, fmtDT,
   },
   mounted() { if (state.token) this.search(); },
@@ -702,13 +723,13 @@ const OrderQuery = {
         <input v-model="order_no" placeholder="委托单编号"><input v-model="phone" placeholder="联系电话">
         <button class="btn primary" @click="search">查询</button>
       </div>
-      <table class="tbl"><thead><tr><th>编号</th><th>委托单位</th><th>委托人</th><th>样品名称</th><th>检测项目</th><th>状态</th><th>备注</th><th>委托时间</th></tr></thead>
+      <table class="tbl"><thead><tr><th>编号</th><th>委托单位</th><th>委托人</th><th>检测项目</th><th>状态</th><th>备注</th><th>委托时间</th></tr></thead>
       <tbody>
         <tr v-for="o in list" :key="o.id">
-          <td>{{o.order_no}}</td><td>{{o.entrust_org}}</td><td>{{o.entruster}}</td><td>{{o.sample_name}}</td>
+          <td><a class="link" @click="openDetail(o)">{{o.order_no}}</a></td><td>{{o.entrust_org}}</td><td>{{o.entruster}}</td>
           <td>{{o.test_item}}</td><td v-html="badge(o.status)"></td><td>{{ o.status === '已否决' ? o.reject_reason : '' }}</td><td>{{fmtD(o.created_at)}}</td>
         </tr>
-        <tr v-if="!list.length"><td colspan="8" class="empty">输入条件后查询</td></tr>
+        <tr v-if="!list.length"><td colspan="7" class="empty">输入条件后查询</td></tr>
       </tbody></table>
     </div>
     <div v-else>
@@ -717,17 +738,17 @@ const OrderQuery = {
           <option v-for="s in ['待审核','已审核','已排期','实验中','已完成','已否决']" :key="s" :value="s">{{s}}</option></select>
         <input v-model="keyword" placeholder="编号/委托人/单位/型号/样品名"><button class="btn primary" @click="search">查询</button>
       </div>
-      <table class="tbl"><thead><tr><th>委托编号</th><th>实验编号</th><th>委托单位</th><th>委托人</th><th>样品</th><th>检测项目</th><th>状态</th><th>备注</th><th>委托时间</th><th v-if="isAdmin()">操作</th></tr></thead>
+      <table class="tbl"><thead><tr><th>委托编号</th><th>实验编号</th><th>委托单位</th><th>委托人</th><th>检测项目</th><th>状态</th><th>备注</th><th>委托时间</th><th v-if="isAdmin()">操作</th></tr></thead>
       <tbody>
         <tr v-for="o in all" :key="o.id">
-          <td>{{o.order_no}}</td><td>{{o.experiment_no||'-'}}</td><td>{{o.entrust_org}}</td><td>{{o.entruster}}</td>
-          <td>{{o.sample_name}} ×{{o.sample_count}}</td><td>{{o.test_item}}</td><td v-html="badge(o.status)"></td><td>{{ o.status === '已否决' ? o.reject_reason : '' }}</td><td>{{fmtD(o.created_at)}}</td>
+          <td><a class="link" @click="openDetail(o)">{{o.order_no}}</a></td><td>{{o.experiment_no||'-'}}</td><td>{{o.entrust_org}}</td><td>{{o.entruster}}</td>
+          <td>{{o.test_item}}</td><td v-html="badge(o.status)"></td><td>{{ o.status === '已否决' ? o.reject_reason : '' }}</td><td>{{fmtD(o.created_at)}}</td>
           <td v-if="isAdmin()">
             <button class="btn sm" v-if="canEdit(o)" @click="openEdit(o)">修改</button>
             <button class="btn danger sm" v-if="canEdit(o)" @click="remove(o)">删除</button>
           </td>
         </tr>
-        <tr v-if="!all.length"><td :colspan="isAdmin() ? 10 : 9" class="empty">暂无数据</td></tr>
+        <tr v-if="!all.length"><td :colspan="isAdmin() ? 9 : 8" class="empty">暂无数据</td></tr>
       </tbody></table>
     </div>
   </div>
@@ -737,7 +758,6 @@ const OrderQuery = {
       <div class="form-row">
         <div class="form-group"><label><span class="req">*</span>委托单位</label><select v-model="editForm.entrust_org"><option>音频研发中心</option><option>创新事业部</option><option>国内事业部</option><option>高端事业部</option><option>营销中心</option><option>供应链中心</option><option>工程质量中心</option></select></div>
         <div class="form-group"><label>委托人</label><input v-model="editForm.entruster"></div>
-        <div class="form-group"><label><span class="req">*</span>样品名称</label><input v-model="editForm.sample_name"></div>
         <div class="form-group"><label><span class="req">*</span>DHD型号</label><input v-model="editForm.sample_model"></div>
       </div>
       <div class="form-row">
@@ -749,13 +769,11 @@ const OrderQuery = {
       <div class="form-row">
         <div class="form-group"><label><span class="req">*</span>联系电话</label><input v-model="editForm.phone"></div>
         <div class="form-group"><label><span class="req">*</span>邮箱</label><input v-model="editForm.email"></div>
-        <div class="form-group"><label>跟踪人</label><input v-model="editForm.tracker"></div>
         <div class="form-group"><label>样品处理</label><select v-model="editForm.sample_dispose"><option>退还</option><option>报废</option><option>留存</option></select></div>
       </div>
       <div class="form-row">
         <div class="form-group"><label>样品状态</label><input v-model="editForm.sample_status"></div>
         <div class="form-group"><label>存放要求</label><input v-model="editForm.storage_require"></div>
-        <div class="form-group"><label>检测依据</label><input v-model="editForm.test_basis"></div>
         <div class="form-group"><label>要求完成时间</label><input type="datetime-local" v-model="editForm.required_start"></div>
       </div>
       <div class="form-group"><label>试验条件</label><textarea v-model="editForm.test_condition"></textarea></div>
@@ -765,6 +783,30 @@ const OrderQuery = {
         <button class="btn" @click="showEdit=false">取消</button>
         <button class="btn primary" @click="saveEdit">保存修改</button>
       </div>
+    </div>
+  </div>
+  <div class="modal-mask" v-if="detail" @click.self="detail=null">
+    <div class="modal" style="width:860px">
+      <h3>实验委托申请 —— {{detail.order_no}}</h3>
+      <table class="tbl"><tbody>
+        <tr><td class="detail-lbl">委托编号</td><td>{{detail.order_no}}</td><td class="detail-lbl">状态</td><td v-html="badge(detail.status)"></td></tr>
+        <tr><td class="detail-lbl">委托单位</td><td>{{detail.entrust_org}}</td><td class="detail-lbl">委托人</td><td>{{detail.entruster}}</td></tr>
+        <tr><td class="detail-lbl">DHD型号</td><td>{{detail.sample_model}}</td><td class="detail-lbl">客户型号</td><td>{{detail.customer_model || '-'}}</td></tr>
+        <tr><td class="detail-lbl">样品名称</td><td>{{detail.sample_name || '-'}}</td><td class="detail-lbl">数量</td><td>{{detail.sample_count}}{{detail.sample_unit}}</td></tr>
+        <tr><td class="detail-lbl">检测项目</td><td>{{detail.test_item}}</td><td class="detail-lbl">测试阶段</td><td>{{detail.test_stage}}</td></tr>
+        <tr><td class="detail-lbl">检测依据</td><td colspan="3">{{detail.test_basis || '-'}}</td></tr>
+        <tr><td class="detail-lbl">试验原因</td><td>{{detail.test_reason || '-'}}</td><td class="detail-lbl">报告要求</td><td>{{detail.report_lang || '-'}}</td></tr>
+        <tr><td class="detail-lbl">联系电话</td><td>{{detail.phone}}</td><td class="detail-lbl">邮箱</td><td>{{detail.email}}</td></tr>
+        <tr><td class="detail-lbl">样品状态</td><td>{{detail.sample_status || '-'}}</td><td class="detail-lbl">存放要求</td><td>{{detail.storage_require || '-'}}</td></tr>
+        <tr><td class="detail-lbl">样品处理</td><td>{{detail.sample_dispose || '-'}}</td><td class="detail-lbl">要求完成时间</td><td>{{fmtDT(detail.required_start) || '-'}}</td></tr>
+        <tr v-if="detail.tracker || detail.tracker_email"><td class="detail-lbl">跟踪人</td><td>{{detail.tracker || '-'}}</td><td class="detail-lbl">跟踪人邮箱</td><td>{{detail.tracker_email || '-'}}</td></tr>
+        <tr v-if="detail.test_condition"><td class="detail-lbl">试验条件</td><td colspan="3" style="white-space:pre-wrap">{{detail.test_condition}}</td></tr>
+        <tr v-if="detail.criteria"><td class="detail-lbl">判定标准</td><td colspan="3" style="white-space:pre-wrap">{{detail.criteria}}</td></tr>
+        <tr v-if="detail.reject_reason"><td class="detail-lbl">否决原因</td><td colspan="3" style="color:#c62828">{{detail.reject_reason}}</td></tr>
+        <tr v-if="detail.remark"><td class="detail-lbl">备注</td><td colspan="3" style="white-space:pre-wrap">{{detail.remark}}</td></tr>
+        <tr><td class="detail-lbl">委托时间</td><td colspan="3">{{fmtDT(detail.created_at)}}</td></tr>
+      </tbody></table>
+      <div class="modal-actions"><button class="btn primary" @click="copyToNew">复制实验委托申请</button><button class="btn" @click="detail=null">关闭</button></div>
     </div>
   </div>`,
 };
@@ -809,14 +851,14 @@ const ReviewView = {
   template: `
   <div class="card">
     <h3>委托审核</h3>
-    <table class="tbl"><thead><tr><th>委托编号</th><th>委托单位</th><th>委托人</th><th>样品</th><th>检测项目</th><th>委托时间</th><th>操作</th></tr></thead>
+    <table class="tbl"><thead><tr><th>委托编号</th><th>委托单位</th><th>委托人</th><th>检测项目</th><th>委托时间</th><th>操作</th></tr></thead>
     <tbody>
       <tr v-for="o in list" :key="o.id">
-        <td>{{o.order_no}}</td><td>{{o.entrust_org}}</td><td>{{o.entruster}}</td><td>{{o.sample_name}} ×{{o.sample_count}}</td>
+        <td>{{o.order_no}}</td><td>{{o.entrust_org}}</td><td>{{o.entruster}}</td>
         <td>{{o.test_item}}</td><td>{{fmtD(o.created_at)}}</td>
         <td><button class="btn primary sm" @click="open(o)">审核</button></td>
       </tr>
-      <tr v-if="!list.length"><td colspan="7" class="empty">暂无待审核委托</td></tr>
+      <tr v-if="!list.length"><td colspan="6" class="empty">暂无待审核委托</td></tr>
     </tbody></table>
   </div>
   <div class="modal-mask" v-if="showModal" @click.self="showModal=false">
@@ -825,7 +867,7 @@ const ReviewView = {
       <div v-if="detail">
         <table class="tbl"><tbody>
           <tr><td style="width:100px" class="lbl">委托单位</td><td>{{detail.entrust_org}}</td><td style="width:80px" class="lbl">委托人</td><td>{{detail.entruster}}</td></tr>
-          <tr><td class="lbl">样品</td><td>{{detail.sample_name}} / {{detail.sample_model}} ×{{detail.sample_count}}{{detail.sample_unit}}</td><td class="lbl">检测项目</td><td>{{detail.test_item}}</td></tr>
+          <tr><td class="lbl">样品</td><td>{{detail.sample_model}} ×{{detail.sample_count}}{{detail.sample_unit}}</td><td class="lbl">检测项目</td><td>{{detail.test_item}}</td></tr>
           <tr><td class="lbl">检测依据</td><td colspan="3">{{detail.test_basis || '客户自定义条件'}}</td></tr>
           <tr v-if="detail.test_condition"><td class="lbl">试验条件</td><td colspan="3" style="white-space:pre-wrap">{{detail.test_condition}}</td></tr>
           <tr v-if="detail.criteria"><td class="lbl">判定标准</td><td colspan="3" style="white-space:pre-wrap">{{detail.criteria}}</td></tr>
@@ -902,7 +944,7 @@ function printSampleLabels(order, samples) {
       <div class="lbl-head">${escHtml(order.entrust_org) || '&nbsp;'}</div>
       <div class="barcode">${code39(s.sample_no)}</div>
       <div class="code">${escHtml(s.sample_no)}</div>
-      <div class="info">${escHtml(order.sample_name)}${order.sample_model ? ' / ' + escHtml(order.sample_model) : ''}</div>
+      <div class="info">${escHtml(order.sample_model)}</div>
       <div class="info">状况：${escHtml(s.condition) || '-'}　状态：${escHtml(s.status)}</div>
     </div>`).join('');
   const w = window.open('', '_blank', 'width=720,height=820');
@@ -918,7 +960,7 @@ function printSampleLabels(order, samples) {
     @media print{body{padding:0}}
   </style></head><body>
     <div class="checkout"><h3>样品领出单</h3>
-      <p>实验编号：${escHtml(order.experiment_no || order.order_no)}　委托单位：${escHtml(order.entrust_org) || '-'}　样品名称：${escHtml(order.sample_name) || '-'}</p>
+      <p>实验编号：${escHtml(order.experiment_no || order.order_no)}　委托单位：${escHtml(order.entrust_org) || '-'}</p>
       <p>领出人签字：＿＿＿＿＿＿　　/　　接收人签字：＿＿＿＿＿＿　　/　　日期：＿＿＿＿年＿＿月＿＿日</p>
     </div>
     <div class="labels">${labels}</div>
@@ -965,15 +1007,15 @@ const SamplesView = {
   template: `
   <div class="card">
     <h3>样品管理</h3>
-    <table class="tbl"><thead><tr><th>实验编号</th><th>委托单位</th><th>样品</th><th>数量</th><th>状态</th><th>操作</th></tr></thead>
+    <table class="tbl"><thead><tr><th>实验编号</th><th>委托单位</th><th>数量</th><th>状态</th><th>操作</th></tr></thead>
     <tbody>
       <template v-for="o in orders" :key="o.id">
         <tr v-if="o.status!=='待审核' && o.status!=='已否决'">
-          <td>{{o.experiment_no||o.order_no}}</td><td>{{o.entrust_org}}</td><td>{{o.sample_name}}</td><td>{{o.sample_count}}</td>
+          <td>{{o.experiment_no||o.order_no}}</td><td>{{o.entrust_org}}</td><td>{{o.sample_count}}</td>
           <td v-html="badge(o.status)"></td><td><button class="btn primary sm" @click="open(o)">样品管理</button></td>
         </tr>
       </template>
-      <tr v-if="!orders.length"><td colspan="6" class="empty">暂无委托单</td></tr>
+      <tr v-if="!orders.length"><td colspan="5" class="empty">暂无委托单</td></tr>
     </tbody></table>
   </div>
   <div class="modal-mask" v-if="showModal" @click.self="showModal=false">
@@ -1041,11 +1083,11 @@ const ScheduleView = {
   template: `
   <div class="card">
     <h3>实验排期</h3>
-    <table class="tbl"><thead><tr><th>实验编号</th><th>委托单位</th><th>样品</th><th>检测项目</th><th>状态</th><th>操作</th></tr></thead>
+    <table class="tbl"><thead><tr><th>实验编号</th><th>委托单位</th><th>检测项目</th><th>状态</th><th>操作</th></tr></thead>
     <tbody>
       <template v-for="o in orders" :key="o.id">
         <tr v-if="['已审核','已排期','实验中'].includes(o.status)">
-          <td>{{o.experiment_no||o.order_no}}</td><td>{{o.entrust_org}}</td><td>{{o.sample_name}}</td><td>{{o.test_item}}</td>
+          <td>{{o.experiment_no||o.order_no}}</td><td>{{o.entrust_org}}</td><td>{{o.test_item}}</td>
           <td v-html="badge(o.status)"></td><td><button class="btn primary sm" @click="open(o)">排期</button></td>
         </tr>
       </template>
@@ -1099,11 +1141,11 @@ const ExperimentView = {
   template: `
   <div class="card">
     <h3>开始 / 结束实验</h3>
-    <table class="tbl"><thead><tr><th>实验编号</th><th>委托单位</th><th>样品</th><th>检测项目</th><th>状态</th><th>操作</th></tr></thead>
+    <table class="tbl"><thead><tr><th>实验编号</th><th>委托单位</th><th>检测项目</th><th>状态</th><th>操作</th></tr></thead>
     <tbody>
       <template v-for="o in orders" :key="o.id">
         <tr v-if="['已排期','实验中'].includes(o.status)">
-          <td>{{o.experiment_no||o.order_no}}</td><td>{{o.entrust_org}}</td><td>{{o.sample_name}}</td><td>{{o.test_item}}</td>
+          <td>{{o.experiment_no||o.order_no}}</td><td>{{o.entrust_org}}</td><td>{{o.test_item}}</td>
           <td v-html="badge(o.status)"></td><td><button class="btn primary sm" @click="open(o)">实验操作</button></td>
         </tr>
       </template>
@@ -1178,11 +1220,11 @@ const ReportsView = {
     </div>
     <div class="card" v-if="tab==='gen'">
       <h3>实验报告</h3>
-      <table class="tbl"><thead><tr><th>实验编号</th><th>委托单位</th><th>样品</th><th>检测项目</th><th>状态</th><th>操作</th></tr></thead>
+      <table class="tbl"><thead><tr><th>实验编号</th><th>委托单位</th><th>检测项目</th><th>状态</th><th>操作</th></tr></thead>
       <tbody>
         <template v-for="o in orders" :key="o.id">
           <tr v-if="o.status!=='待审核' && o.status!=='已否决'">
-            <td>{{o.experiment_no||o.order_no}}</td><td>{{o.entrust_org}}</td><td>{{o.sample_name}}</td><td>{{o.test_item}}</td>
+            <td>{{o.experiment_no||o.order_no}}</td><td>{{o.entrust_org}}</td><td>{{o.test_item}}</td>
             <td v-html="badge(o.status)"></td><td><button class="btn primary sm" @click="open(o)">生成报告</button></td>
           </tr>
         </template>
@@ -1192,20 +1234,20 @@ const ReportsView = {
       <div class="toolbar"><h3 style="flex:1">归档报告</h3>
         <select v-model="archType" @change="loadArchive"><option value="">全部类型</option><option>委托记录单</option><option>检测报告</option></select>
         <input v-model="archKeyword" placeholder="编号/样品/单位关键字" @keyup.enter="loadArchive"><button class="btn primary" @click="loadArchive">查询</button></div>
-      <table class="tbl"><thead><tr><th>报告编号</th><th>委托/实验编号</th><th>样品</th><th>委托单位</th><th>类型</th><th>版本</th><th>状态</th><th>签发时间</th><th>操作</th></tr></thead>
+      <table class="tbl"><thead><tr><th>报告编号</th><th>委托/实验编号</th><th>委托单位</th><th>类型</th><th>版本</th><th>状态</th><th>签发时间</th><th>操作</th></tr></thead>
       <tbody>
         <tr v-for="r in archives" :key="r.id">
-          <td>{{r.report_no}}</td><td>{{r.order_no}} / {{r.experiment_no||'-'}}</td><td>{{r.sample_name}}</td><td>{{r.entrust_org}}</td><td>{{r.report_type}}</td><td>{{r.version||'-'}}</td>
+          <td>{{r.report_no}}</td><td>{{r.order_no}} / {{r.experiment_no||'-'}}</td><td>{{r.entrust_org}}</td><td>{{r.report_type}}</td><td>{{r.version||'-'}}</td>
           <td v-html="badge(r.status)"></td><td>{{fmtDT(r.issued_at)}}</td>
           <td><button class="btn link" @click="viewArchive(r)">查看</button><button class="btn link" v-if="state.role==='admin'" @click="delArchive(r)">作废</button></td>
         </tr>
-        <tr v-if="!archives.length"><td colspan="9" class="empty">暂无归档报告</td></tr>
+        <tr v-if="!archives.length"><td colspan="8" class="empty">暂无归档报告</td></tr>
       </tbody></table>
     </div>
     <div class="modal-mask" v-if="showModal" @click.self="showModal=false">
       <div class="modal" style="width:520px">
         <h3>报告类型</h3>
-        <p style="margin-bottom:16px;color:#6b7a90">实验编号：{{cur.experiment_no||cur.order_no}}　|　{{cur.sample_name}}　|　{{cur.test_item}}</p>
+        <p style="margin-bottom:16px;color:#6b7a90">实验编号：{{cur.experiment_no||cur.order_no}}　|　{{cur.test_item}}</p>
         <button class="btn primary" style="width:100%;margin-bottom:10px" @click="report('entrust')">实验委托记录单（表-TC05-01A）</button>
         <button class="btn" style="width:100%;margin-bottom:10px" @click="report('test','常规')">检测报告（常规版）</button>
         <button class="btn" style="width:100%" @click="report('test','检测')">检测报告（检测版）</button>
@@ -1488,7 +1530,7 @@ const StatisticsView = {
     detailMeta(type, key) {
       const ORD = [
         { k: 'order_no', t: '委托编号' }, { k: 'experiment_no', t: '实验编号' },
-        { k: 'entrust_org', t: '委托单位' }, { k: 'sample_name', t: '样品' },
+        { k: 'entrust_org', t: '委托单位' },
         { k: 'test_item', t: '检测项目' }, { k: 'status', t: '状态' },
         { k: 'total_cost', t: '费用' }, { k: 'created_at', t: '委托时间' }, { k: 'finish_at', t: '完成时间' },
       ];
@@ -1650,11 +1692,11 @@ const CustomersView = {
     <div class="modal-mask" v-if="detail" @click.self="detail=null">
       <div class="modal" style="width:760px">
         <h3>{{detail.name}} —— 历史委托</h3>
-        <table class="tbl"><thead><tr><th>委托编号</th><th>实验编号</th><th>样品</th><th>检测项目</th><th>状态</th><th>委托时间</th></tr></thead>
+        <table class="tbl"><thead><tr><th>委托编号</th><th>实验编号</th><th>检测项目</th><th>状态</th><th>委托时间</th></tr></thead>
         <tbody><tr v-for="o in orders" :key="o.id">
-          <td>{{o.order_no}}</td><td>{{o.experiment_no||'-'}}</td><td>{{o.sample_name}}</td><td>{{o.test_item}}</td>
+          <td>{{o.order_no}}</td><td>{{o.experiment_no||'-'}}</td><td>{{o.test_item}}</td>
           <td v-html="badge(o.status)"></td><td>{{fmtD(o.created_at)}}</td>
-        </tr><tr v-if="!orders.length"><td colspan="6" class="empty">暂无委托</td></tr></tbody></table>
+        </tr><tr v-if="!orders.length"><td colspan="5" class="empty">暂无委托</td></tr></tbody></table>
         <div class="modal-actions"><button class="btn" @click="detail=null">关闭</button></div>
       </div>
     </div>

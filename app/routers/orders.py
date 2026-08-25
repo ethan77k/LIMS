@@ -40,7 +40,6 @@ def create_order(
     _require_fields = {
         "委托单位": values.get("entrust_org"),
         "委托人": values.get("entruster"),
-        "样品名称": values.get("sample_name"),
         "检测项目": values.get("test_item"),
         "联系电话": values.get("phone"),
         "内网邮箱": values.get("email"),

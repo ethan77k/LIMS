@@ -83,7 +83,7 @@ def render_entrust_html(o: EntrustOrder) -> str:
   <table>
     <tr><td class="lbl">委托单位</td><td colspan="4">{_fmt(o.entrust_org)}</td><td class="lbl">委托人</td><td colspan="3">{_fmt(o.entruster)}</td></tr>
     <tr><td class="lbl">样品型号</td><td colspan="4">{_fmt(o.sample_model)}</td><td class="lbl">样品数量</td><td colspan="3">{o.sample_count} {_fmt(o.sample_unit)}</td></tr>
-    <tr><td class="lbl">样品名称</td><td colspan="4">{_fmt(o.sample_name)}</td><td class="lbl">客户型号</td><td colspan="3">{_fmt(o.customer_model)}</td></tr>
+    <tr><td class="lbl">客户型号</td><td colspan="8">{_fmt(o.customer_model)}</td></tr>
     <tr><td class="lbl">检测项目</td><td colspan="4">{_fmt(o.test_item)}</td><td class="lbl">项目名称</td><td colspan="3">{_fmt(o.test_item_en)}</td></tr>
     <tr><td class="lbl">检验依据</td><td colspan="9">{_fmt(o.test_basis) or '客户自定义条件'}</td></tr>
     <tr><td class="lbl">试验原因</td><td colspan="2">{_fmt(o.test_reason)}</td><td class="lbl">报告要求</td><td colspan="2">{_fmt(o.report_lang)}</td><td class="lbl">试验成本</td><td colspan="2">{o.total_cost} 元</td></tr>

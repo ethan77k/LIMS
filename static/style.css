@@ -64,6 +64,8 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
 .tbl th, .tbl td { padding: 9px 10px; text-align: left; border-bottom: 1px solid var(--border); }
 .tbl th { background: #f7f9fc; color: var(--muted); font-weight: 600; white-space: nowrap; }
 .tbl tr:hover td { background: #fafbfd; }
+.tbl td.detail-lbl { background: #f7f9fc; color: var(--muted); font-weight: 600; white-space: nowrap; }
+a.link { color: var(--info); cursor: pointer; text-decoration: underline; }
 .tbl .empty { text-align: center; color: var(--muted); padding: 30px; }
 
 .badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 12px; white-space: nowrap; }
