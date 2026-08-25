@@ -89,6 +89,7 @@ class OrderCreate(BaseModel):
     remark: str = ""
     required_start: datetime | None = None
     case_id: int | None = None
+    copy_image_ids: list[int] = []   # 复制委托申请时，要一并复制的原单附件图片 id
 
 
 class OrderUpdate(BaseModel):

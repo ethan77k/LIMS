@@ -64,6 +64,7 @@ def order_to_dict(o, with_detail=True) -> dict:
         "reviewer_id": o.reviewer_id, "review_at": _dt(o.review_at),
         "reject_reason": o.reject_reason, "total_cost": round(o.total_cost, 2),
         "finish_at": _dt(o.finish_at), "case_id": o.case_id,
+        "images": [order_image_to_dict(i) for i in sorted(o.images, key=lambda x: x.id)],
     }
     if with_detail:
         d["samples"] = [sample_to_dict(s) for s in sorted(o.samples, key=lambda x: x.id)]
@@ -134,6 +135,10 @@ def report_to_dict(r) -> dict:
 
 def case_image_to_dict(img) -> dict:
     return {"id": img.id, "case_id": img.case_id, "filename": img.filename, "path": img.path}
+
+
+def order_image_to_dict(img) -> dict:
+    return {"id": img.id, "order_id": img.order_id, "filename": img.filename, "path": img.path}
 
 
 def case_to_dict(c) -> dict:

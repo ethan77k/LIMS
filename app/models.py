@@ -95,6 +95,7 @@ class EntrustOrder(Base):
     schedules: Mapped[list["Schedule"]] = relationship("Schedule", back_populates="order", cascade="all, delete-orphan")
     costs: Mapped[list["CostItem"]] = relationship("CostItem", back_populates="order", cascade="all, delete-orphan")
     case: Mapped["TestCase | None"] = relationship("TestCase", foreign_keys=[case_id])
+    images: Mapped[list["OrderImage"]] = relationship("OrderImage", back_populates="order", cascade="all, delete-orphan")
 
 
 # ---------------------------------------------------------------------------
@@ -355,4 +356,17 @@ class TestCaseImage(Base):
     case: Mapped["TestCase"] = relationship("TestCase", back_populates="images")
     filename: Mapped[str] = mapped_column(String(256), default="")   # 原始文件名
     path: Mapped[str] = mapped_column(String(512), default="")       # 相对访问路径 /uploads/cases/xxx
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+
+
+class OrderImage(Base):
+    """委托申请上传的附件图片（试验条件附图等）。"""
+
+    __tablename__ = "order_images"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    order_id: Mapped[int] = mapped_column(ForeignKey("entrust_orders.id"), index=True)
+    order: Mapped["EntrustOrder"] = relationship("EntrustOrder", back_populates="images")
+    filename: Mapped[str] = mapped_column(String(256), default="")   # 原始文件名
+    path: Mapped[str] = mapped_column(String(512), default="")       # 相对访问路径 /uploads/orders/xxx
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)

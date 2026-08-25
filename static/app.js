@@ -310,7 +310,7 @@ const Dashboard = {
 
 /* ---------------- 委托申请 ---------------- */
 const OrderNew = {
-  data: () => ({ form: emptyOrder(), results: [], caseGroups: [], activeGroupId: null, mode: 'manual' }),
+  data: () => ({ form: emptyOrder(), results: [], caseGroups: [], activeGroupId: null, mode: 'manual', images: [], copiedImages: [] }),
   computed: {
     activeGroupCases() {
       const g = this.caseGroups.find(x => x.id === this.activeGroupId);
@@ -349,7 +349,17 @@ const OrderNew = {
         } else {
           if (!this.form.test_item) { toast('请填写：检测项目', 'error'); return; }
           const payload = { ...this.form, required_start: this.form.required_start || null };
-          results.push(await api('/api/orders', 'POST', payload));
+          if (this.copiedImages.length) payload.copy_image_ids = this.copiedImages.map(im => im.id);
+          const created = await api('/api/orders', 'POST', payload);
+          results.push(created);
+          if (this.images.length) {
+            try {
+              for (const im of this.images) await uploadOrderImage(created.id, im.file);
+            } catch (e) { toast('委托已提交，但附件图片上传失败：' + e.message, 'error'); }
+          }
+          this.images.forEach(im => URL.revokeObjectURL(im.url));
+          this.images = [];
+          this.copiedImages = [];
           toast('提交成功', 'success');
         }
         this.results = results;
@@ -359,13 +369,30 @@ const OrderNew = {
     reset() {
       this.form = emptyOrder();
       this.results = [];
+      this.images.forEach(im => URL.revokeObjectURL(im.url));
+      this.images = [];
+      this.copiedImages = [];
       this.caseGroups.forEach(g => (g.cases || []).forEach(c => c.checked = false));
     },
+    onPickImages(e) {
+      const files = Array.from(e.target.files || []);
+      files.forEach(f => {
+        if (!f.type || !f.type.startsWith('image/')) { toast('仅支持图片文件', 'error'); return; }
+        if (f.size > 5 * 1024 * 1024) { toast(`「${f.name}」超过 5MB，已跳过`, 'error'); return; }
+        this.images.push({ file: f, url: URL.createObjectURL(f) });
+      });
+      e.target.value = '';
+    },
+    removeImage(i) { URL.revokeObjectURL(this.images[i].url); this.images.splice(i, 1); },
+    removeCopiedImage(i) { this.copiedImages.splice(i, 1); },
   },
   async mounted() {
     // 「复制实验委托申请」：带入委托查询里点击复制的内容
     if (state.orderPrefill) {
-      this.form = { ...this.form, ...state.orderPrefill };
+      const pf = state.orderPrefill;
+      this.copiedImages = pf.copyImages || [];
+      delete pf.copyImages;
+      this.form = { ...this.form, ...pf };
       state.orderPrefill = null;
     }
     // 登录的委托人：自动带出本人姓名，确保委托单与账号绑定
@@ -445,6 +472,23 @@ const OrderNew = {
       <div class="form-group"><label>要求完成时间</label><input type="datetime-local" v-model="form.required_start"></div>
     </div>
     <div class="form-group" v-if="mode==='manual'"><label>试验条件</label><textarea v-model="form.test_condition"></textarea></div>
+    <div class="form-group" v-if="mode==='manual'"><label>试验条件附图（可多选，单张 ≤5MB）</label>
+      <div v-if="copiedImages.length" style="margin-bottom:6px;font-size:12px;color:var(--muted)">已从原单带入 {{copiedImages.length}} 张附图，提交后将随新单复制：</div>
+      <div class="img-thumbs" v-if="copiedImages.length" style="margin-bottom:8px">
+        <div v-for="(im,i) in copiedImages" :key="'c'+i" style="position:relative">
+          <a :href="im.path" target="_blank" :title="im.filename"><img :src="im.path" :alt="im.filename"></a>
+          <span @click="removeCopiedImage(i)" style="position:absolute;top:-6px;right:-6px;background:#c62828;color:#fff;border-radius:50%;width:18px;height:18px;line-height:18px;text-align:center;cursor:pointer;font-size:12px">×</span>
+        </div>
+      </div>
+      <input type="file" accept="image/*" multiple @change="onPickImages" style="display:none" ref="imgInput">
+      <button class="btn" type="button" @click="$refs.imgInput.click()">选择图片（追加）</button>
+      <div class="img-thumbs" v-if="images.length" style="margin-top:8px">
+        <div v-for="(im,i) in images" :key="i" style="position:relative">
+          <img :src="im.url" :alt="im.file.name" :title="im.file.name">
+          <span @click="removeImage(i)" style="position:absolute;top:-6px;right:-6px;background:#c62828;color:#fff;border-radius:50%;width:18px;height:18px;line-height:18px;text-align:center;cursor:pointer;font-size:12px">×</span>
+        </div>
+      </div>
+    </div>
     <div class="form-group" v-if="mode==='manual'"><label>判定标准</label><textarea v-model="form.criteria"></textarea></div>
     <div class="form-group"><label>备注</label><textarea v-model="form.remark"></textarea></div>
     <div style="margin-top:10px">
@@ -476,6 +520,18 @@ async function uploadCaseImage(caseId, file) {
   const data = await res.json().catch(() => ({}));
   if (res.status === 401) { logout(); throw new Error('未登录或登录已过期'); }
   if (!res.ok) throw new Error((data && data.detail) || '上传失败');
+  return data;
+}
+
+async function uploadOrderImage(orderId, file) {
+  const fd = new FormData();
+  fd.append('file', file);
+  const headers = {};
+  if (state.token) headers['Authorization'] = 'Bearer ' + state.token;
+  const res = await fetch('/api/orders/' + orderId + '/images', { method: 'POST', headers, body: fd });
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 401) { logout(); throw new Error('未登录或登录已过期'); }
+  if (!res.ok) throw new Error((data && data.detail) || '图片上传失败');
   return data;
 }
 
@@ -689,7 +745,13 @@ const OrderQuery = {
         toast('已删除', 'success'); this.search();
       } catch (e) { toast(e.message, 'error'); }
     },
-    openDetail(o) { this.detail = o; },
+    openDetail(o) {
+      this.detail = o;
+      // 登录的审核/实验员：拉取完整详情以带出附件图片（免登录查询接口无 images 字段）
+      if (state.token && (state.role === 'admin' || state.role === 'experimenter')) {
+        api('/api/orders/' + o.id).then(d => { this.detail = d; }).catch(() => {});
+      }
+    },
     copyToNew() {
       const o = this.detail;
       if (!o) return;
@@ -707,6 +769,7 @@ const OrderQuery = {
         test_condition: o.test_condition || '', criteria: o.criteria || '', remark: o.remark || '',
         required_start: o.required_start ? String(o.required_start).slice(0, 16) : '',
         case_id: null,
+        copyImages: (o.images || []).map(im => ({ id: im.id, path: im.path, filename: im.filename })),
       };
       this.detail = null;
       navigate('/orders/new');
@@ -801,6 +864,7 @@ const OrderQuery = {
         <tr><td class="detail-lbl">样品处理</td><td>{{detail.sample_dispose || '-'}}</td><td class="detail-lbl">要求完成时间</td><td>{{fmtDT(detail.required_start) || '-'}}</td></tr>
         <tr v-if="detail.tracker || detail.tracker_email"><td class="detail-lbl">跟踪人</td><td>{{detail.tracker || '-'}}</td><td class="detail-lbl">跟踪人邮箱</td><td>{{detail.tracker_email || '-'}}</td></tr>
         <tr v-if="detail.test_condition"><td class="detail-lbl">试验条件</td><td colspan="3" style="white-space:pre-wrap">{{detail.test_condition}}</td></tr>
+        <tr v-if="detail.images && detail.images.length"><td class="detail-lbl">试验条件附图</td><td colspan="3"><div class="img-thumbs"><a v-for="im in detail.images" :key="im.id" :href="im.path" target="_blank" :title="im.filename"><img :src="im.path" :alt="im.filename"></a></div></td></tr>
         <tr v-if="detail.criteria"><td class="detail-lbl">判定标准</td><td colspan="3" style="white-space:pre-wrap">{{detail.criteria}}</td></tr>
         <tr v-if="detail.reject_reason"><td class="detail-lbl">否决原因</td><td colspan="3" style="color:#c62828">{{detail.reject_reason}}</td></tr>
         <tr v-if="detail.remark"><td class="detail-lbl">备注</td><td colspan="3" style="white-space:pre-wrap">{{detail.remark}}</td></tr>
@@ -870,6 +934,7 @@ const ReviewView = {
           <tr><td class="lbl">样品</td><td>{{detail.sample_model}} ×{{detail.sample_count}}{{detail.sample_unit}}</td><td class="lbl">检测项目</td><td>{{detail.test_item}}</td></tr>
           <tr><td class="lbl">检测依据</td><td colspan="3">{{detail.test_basis || '客户自定义条件'}}</td></tr>
           <tr v-if="detail.test_condition"><td class="lbl">试验条件</td><td colspan="3" style="white-space:pre-wrap">{{detail.test_condition}}</td></tr>
+          <tr v-if="detail.images && detail.images.length"><td class="lbl">试验条件附图</td><td colspan="3"><div class="img-thumbs"><a v-for="im in detail.images" :key="im.id" :href="im.path" target="_blank" :title="im.filename"><img :src="im.path" :alt="im.filename"></a></div></td></tr>
           <tr v-if="detail.criteria"><td class="lbl">判定标准</td><td colspan="3" style="white-space:pre-wrap">{{detail.criteria}}</td></tr>
           <tr v-if="detail.case_images && detail.case_images.length"><td class="lbl">用例图片</td><td colspan="3"><div class="img-thumbs"><a v-for="im in detail.case_images" :key="im.id" :href="im.path" target="_blank" :title="im.filename"><img :src="im.path" :alt="im.filename"></a></div></td></tr>
           <tr><td class="lbl">联系电话</td><td>{{detail.phone}}</td><td class="lbl">要求时间</td><td>{{fmtDT(detail.required_start)}}</td></tr>
