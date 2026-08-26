@@ -888,13 +888,38 @@ const ReviewView = {
       this.reviewers = (await api('/api/auth/users')).filter(u => u.role !== 'entruster');
       this.allEq = await api('/api/equipment');
       this.rejectReason = ''; this.showModal = true;
-      this.feeRows = [{ test_item: this.detail.test_item, equipment_id: null, count: 1, quantity: this.detail.sample_count || 1, discount: 1 }];
+      this.feeRows = [this.newFee()];
     },
-    addFee() { this.feeRows.push({ test_item: this.detail.test_item, equipment_id: null, count: 1, quantity: this.detail.sample_count || 1, discount: 1 }); },
+    addFee() { this.feeRows.push(this.newFee()); },
+    newFee() { return { test_item: this.detail.test_item, equipment_id: null, open_fee: 0, power_fee: 0, depreciation_fee: 0, consumable_fee: 0, test_time: 0, test_count: 1, quantity: this.detail.sample_count || 1, discount: 1, service_fee: 0 }; },
+    onEqChange(r) {
+      const eq = this.allEq.find(e => e.id === r.equipment_id);
+      if (eq) { r.open_fee = eq.open_fee; r.power_fee = eq.power_fee; r.depreciation_fee = eq.depreciation_fee; r.consumable_fee = eq.consumable_fee; }
+      else { r.open_fee = 0; r.power_fee = 0; r.depreciation_fee = 0; r.consumable_fee = 0; }
+    },
+    rowAmount(r) {
+      const open_fee = Number(r.open_fee) || 0;
+      const power_fee = Number(r.power_fee) || 0;
+      const dep_fee = Number(r.depreciation_fee) || 0;
+      const cons_fee = Number(r.consumable_fee) || 0;
+      const test_time = Number(r.test_time) || 0;
+      const test_count = Number(r.test_count) || 1;
+      const discount = Number(r.discount) || 1;
+      const service_fee = Number(r.service_fee) || 0;
+      const amount = open_fee + (power_fee + dep_fee + cons_fee) * test_time * test_count * discount + service_fee;
+      return Math.round(amount * 100) / 100;
+    },
     async approve() {
+      const missing = [];
+      if (!this.detail || !this.detail.reviewer_id) missing.push('实验员');
+      if (!this.feeRows.some(r => r.equipment_id)) missing.push('费用明细（选择设备）');
+      if (missing.length) { toast('请先填写：' + missing.join('、'), 'error'); return; }
       try {
         const costs = this.feeRows.filter(r => r.equipment_id).map(r => ({
-          equipment_id: r.equipment_id, test_item: r.test_item, count: Number(r.count) || 1, quantity: Number(r.quantity) || 1, discount: Number(r.discount) || 1,
+          equipment_id: r.equipment_id, test_item: r.test_item,
+          test_time: Number(r.test_time) || 0, test_count: Number(r.test_count) || 1,
+          quantity: Number(r.quantity) || 1, discount: Number(r.discount) || 1,
+          service_fee: Number(r.service_fee) || 0,
         }));
         await api('/api/review/' + this.current.id, 'POST', { approve: true, reviewer_id: this.detail.reviewer_id || null, costs });
         toast('审核通过', 'success'); this.showModal = false; this.load();
@@ -926,7 +951,7 @@ const ReviewView = {
     </tbody></table>
   </div>
   <div class="modal-mask" v-if="showModal" @click.self="showModal=false">
-    <div class="modal" style="width:860px">
+    <div class="modal" style="width:1240px">
       <h3>审核委托申请</h3>
       <div v-if="detail">
         <table class="tbl"><tbody>
@@ -940,24 +965,31 @@ const ReviewView = {
           <tr><td class="lbl">联系电话</td><td>{{detail.phone}}</td><td class="lbl">要求时间</td><td>{{fmtDT(detail.required_start)}}</td></tr>
         </tbody></table>
 
-        <h4 style="margin:14px 0 8px">实验员</h4>
+        <h4 style="margin:14px 0 8px"><span style="color:#c62828">*</span>实验员</h4>
         <div class="form-group"><select v-model="detail.reviewer_id">
+          <option :value="null">请选择实验员</option>
           <option v-for="r in reviewers" :value="r.id">{{r.name}}（{{roleText(r.role)}}）</option>
         </select></div>
 
-        <h4 style="margin:14px 0 8px">费用明细（选择设备自动带出计价）</h4>
-        <table class="tbl"><thead><tr><th>试验项目</th><th>设备</th><th>次数/时长</th><th>数量</th><th>折扣</th><th></th></tr></thead>
+        <h4 style="margin:14px 0 8px"><span style="color:#c62828">*</span>费用明细（选择设备自动带出计价）</h4>
+        <div style="overflow-x:auto">
+        <table class="tbl"><thead><tr><th>试验项目</th><th>设备</th><th>开机费</th><th>电费/小时</th><th>设备折旧/小时</th><th>耗材费用/小时</th><th>测试时间</th><th>测试次数</th><th>数量</th><th>折扣</th><th>服务费用</th><th>测试费用（元）</th><th></th></tr></thead>
         <tbody>
           <tr v-for="(r,i) in feeRows" :key="i">
             <td><input v-model="r.test_item" style="width:100%;padding:4px"></td>
-            <td><select v-model="r.equipment_id" style="width:100%;padding:4px"><option :value="null">选择设备</option>
+            <td><select v-model="r.equipment_id" @change="onEqChange(r)" style="width:100%;padding:4px"><option :value="null">选择设备</option>
               <option v-for="e in allEq" :value="e.id">{{e.name}}</option></select></td>
-            <td><input type="number" v-model.number="r.count" style="width:70px;padding:4px"></td>
-            <td><input type="number" v-model.number="r.quantity" style="width:70px;padding:4px"></td>
-            <td><input type="number" step="0.1" v-model.number="r.discount" style="width:70px;padding:4px"></td>
+            <td>{{r.open_fee}}</td><td>{{r.power_fee}}</td><td>{{r.depreciation_fee}}</td><td>{{r.consumable_fee}}</td>
+            <td><input type="number" v-model.number="r.test_time" style="width:64px;padding:4px"></td>
+            <td><input type="number" v-model.number="r.test_count" style="width:64px;padding:4px"></td>
+            <td><input type="number" v-model.number="r.quantity" style="width:64px;padding:4px"></td>
+            <td><input type="number" step="0.1" v-model.number="r.discount" style="width:64px;padding:4px"></td>
+            <td><input type="number" v-model.number="r.service_fee" style="width:72px;padding:4px"></td>
+            <td style="font-weight:600">{{rowAmount(r)}}</td>
             <td><button class="btn link" @click="feeRows.splice(i,1)">删除</button></td>
           </tr>
         </tbody></table>
+        </div>
         <button class="btn sm" style="margin-top:8px" @click="addFee">+ 添加费用项</button>
 
         <div class="form-group" style="margin-top:14px"><label>否决原因（否决时填写）</label><textarea v-model="rejectReason"></textarea></div>
@@ -1372,10 +1404,10 @@ const EquipmentView = {
   <div class="card">
     <div class="toolbar"><h3 style="flex:1">实验设备列表</h3>
       <button class="btn primary" @click="add" v-if="state.role==='admin'">添加设备</button></div>
-    <table class="tbl"><thead><tr><th>名称</th><th>排序</th><th>型号</th><th>编号</th><th>实验类型</th><th>开机费</th><th>电费/时</th><th>折旧/时</th><th>耗材/时</th><th>单价</th><th>功率(kW)</th><th>状态</th><th>管理</th></tr></thead>
+    <table class="tbl"><thead><tr><th>排序</th><th>名称</th><th>型号</th><th>编号</th><th>实验类型</th><th>开机费</th><th>电费/小时</th><th>设备折旧/小时</th><th>耗材费用/小时</th><th>设备单价</th><th>设备功率(kW)</th><th>状态</th><th>管理</th></tr></thead>
     <tbody>
       <tr v-for="e in list" :key="e.id">
-        <td>{{e.name}}</td><td>{{e.sort_order}}</td><td>{{e.model}}</td><td>{{e.code}}</td><td>{{e.exp_type}}</td>
+        <td>{{e.sort_order}}</td><td>{{e.name}}</td><td>{{e.model}}</td><td>{{e.code}}</td><td>{{e.exp_type}}</td>
         <td>{{e.open_fee}}</td><td>{{e.power_fee}}</td><td>{{e.depreciation_fee}}</td><td>{{e.consumable_fee}}</td><td>{{e.unit_price}}</td><td>{{e.power_kw}}</td><td v-html="badge(e.status)"></td>
         <td>
           <button class="btn link" @click="openMaint(e)">校准/维保</button>
@@ -1390,20 +1422,20 @@ const EquipmentView = {
     <div class="modal" style="width:640px">
       <h3>{{editing?'修改设备':'添加设备'}}</h3>
       <div class="form-row">
+        <div class="form-group"><label>排序</label><input type="number" v-model.number="form.sort_order"></div>
         <div class="form-group"><label>名称</label><input v-model="form.name"></div>
         <div class="form-group"><label>型号</label><input v-model="form.model"></div>
       </div>
       <div class="form-row">
         <div class="form-group"><label>编号</label><input v-model="form.code"></div>
         <div class="form-group"><label>实验类型</label><select v-model="form.exp_type"><option v-for="t in types" :value="t">{{t}}</option></select></div>
-        <div class="form-group"><label>排序</label><input type="number" v-model.number="form.sort_order"></div>
         <div class="form-group"><label>状态</label><select v-model="form.status"><option>可用</option><option>使用中</option><option>停用</option><option>报废</option></select></div>
       </div>
       <div class="form-row">
         <div class="form-group"><label>开机费(元)</label><input type="number" v-model.number="form.open_fee"></div>
         <div class="form-group"><label>电费/小时</label><input type="number" v-model.number="form.power_fee"></div>
-        <div class="form-group"><label>折旧费/小时</label><input type="number" v-model.number="form.depreciation_fee"></div>
-        <div class="form-group"><label>耗材费/小时</label><input type="number" v-model.number="form.consumable_fee"></div>
+        <div class="form-group"><label>设备折旧/小时</label><input type="number" v-model.number="form.depreciation_fee"></div>
+        <div class="form-group"><label>耗材费用/小时</label><input type="number" v-model.number="form.consumable_fee"></div>
       </div>
       <div class="form-row">
         <div class="form-group"><label>设备单价(元)</label><input type="number" v-model.number="form.unit_price"></div>

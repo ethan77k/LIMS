@@ -24,8 +24,8 @@ def cost_to_dict(c) -> dict:
         "id": c.id, "equipment_id": c.equipment_id, "test_item": c.test_item,
         "equipment_name": c.equipment_name, "open_fee": c.open_fee, "power_fee": c.power_fee,
         "depreciation_fee": c.depreciation_fee, "consumable_fee": c.consumable_fee,
-        "count": c.count, "quantity": c.quantity,
-        "discount": c.discount, "amount": round(c.amount, 2),
+        "test_time": c.test_time, "test_count": c.test_count, "quantity": c.quantity,
+        "discount": c.discount, "service_fee": c.service_fee, "amount": round(c.amount, 2),
     }
 
 

@@ -20,8 +20,8 @@ from ..serializers import order_to_dict
 
 router = APIRouter(prefix="/api/review", tags=["review"])
 
-# 费用公式：amount = (开机费 + (电费/小时 + 折旧费/小时 + 辅耗材/小时) × 次数) × 数量 × 折扣
-_COST_FORMULA = "金额 = (开机费 + (电费/小时 + 折旧费/小时 + 辅耗材/小时) × 次数) × 数量 × 折扣"
+# 费用公式：amount = 开机费 + (电费/小时 + 设备折旧/小时 + 耗材费用/小时) × 测试时间 × 测试次数 × 折扣 + 服务费用
+_COST_FORMULA = "金额 = 开机费 + (电费/小时 + 设备折旧/小时 + 耗材费用/小时) × 测试时间 × 测试次数 × 折扣 + 服务费用"
 
 
 @router.post("/{order_id}")
@@ -80,10 +80,12 @@ def review_order(
         power_fee = float(eq.power_fee if eq else item.get("power_fee", 0))
         dep_fee = float(eq.depreciation_fee if eq else item.get("depreciation_fee", 0))
         cons_fee = float(eq.consumable_fee if eq else item.get("consumable_fee", 0))
-        count = int(item.get("count", 1) or 1)
+        test_time = float(item.get("test_time", 0) or 0)
+        test_count = int(item.get("test_count", 1) or 1)
         quantity = int(item.get("quantity", 1) or 1)
         discount = float(item.get("discount", 1.0) or 1.0)
-        amount = (open_fee + (power_fee + dep_fee + cons_fee) * count) * quantity * discount
+        service_fee = float(item.get("service_fee", 0) or 0)
+        amount = open_fee + (power_fee + dep_fee + cons_fee) * test_time * test_count * discount + service_fee
         cost = CostItem(
             order_id=order.id,
             equipment_id=item.get("equipment_id"),
@@ -91,7 +93,8 @@ def review_order(
             equipment_name=eq.name if eq else item.get("equipment_name", ""),
             open_fee=open_fee, power_fee=power_fee, depreciation_fee=dep_fee,
             consumable_fee=cons_fee,
-            count=count, quantity=quantity, discount=discount, amount=amount,
+            test_time=test_time, test_count=test_count, quantity=quantity,
+            discount=discount, service_fee=service_fee, amount=round(amount, 2),
         )
         db.add(cost)
         total += amount

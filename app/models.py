@@ -191,12 +191,15 @@ class CostItem(Base):
     equipment_name: Mapped[str] = mapped_column(String(128), default="")  # 设备名称（冗余，防止设备被删）
     open_fee: Mapped[float] = mapped_column(Float, default=0.0)        # 开机费
     power_fee: Mapped[float] = mapped_column(Float, default=0.0)       # 电费/小时
-    depreciation_fee: Mapped[float] = mapped_column(Float, default=0.0)  # 折旧费/小时
-    consumable_fee: Mapped[float] = mapped_column(Float, default=0.0)  # 辅耗材/小时
-    count: Mapped[int] = mapped_column(Integer, default=1)             # 次数
+    depreciation_fee: Mapped[float] = mapped_column(Float, default=0.0)  # 设备折旧/小时
+    consumable_fee: Mapped[float] = mapped_column(Float, default=0.0)  # 耗材费用/小时
+    test_time: Mapped[float] = mapped_column(Float, default=0.0)       # 测试时间（小时）
+    test_count: Mapped[int] = mapped_column(Integer, default=1)        # 测试次数
     quantity: Mapped[int] = mapped_column(Integer, default=1)          # 数量
     discount: Mapped[float] = mapped_column(Float, default=1.0)        # 折扣
+    service_fee: Mapped[float] = mapped_column(Float, default=0.0)     # 服务费用
     amount: Mapped[float] = mapped_column(Float, default=0.0)          # 费用
+    count: Mapped[int] = mapped_column(Integer, default=1)             # 旧字段「次数/时长」，已废弃（保留以兼容历史数据）
 
 
 # ---------------------------------------------------------------------------

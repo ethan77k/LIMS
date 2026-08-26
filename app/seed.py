@@ -21,6 +21,7 @@ def init_db():
         _migrate_case_count_unit(db)
         _migrate_order_case_id(db)
         _migrate_entruster_user_id(db)
+        _migrate_cost_fields(db)
         db.commit()
     finally:
         db.close()
@@ -78,6 +79,17 @@ def _migrate_order_case_id(db):
     cols = [row[1] for row in db.execute(text("PRAGMA table_info(entrust_orders)"))]
     if "case_id" not in cols:
         db.execute(text("ALTER TABLE entrust_orders ADD COLUMN case_id INTEGER REFERENCES test_cases(id)"))
+
+
+def _migrate_cost_fields(db):
+    """为 cost_items 增加 test_time / test_count / service_fee 列（幂等）。"""
+    cols = [row[1] for row in db.execute(text("PRAGMA table_info(cost_items)"))]
+    if "test_time" not in cols:
+        db.execute(text("ALTER TABLE cost_items ADD COLUMN test_time FLOAT DEFAULT 0"))
+    if "test_count" not in cols:
+        db.execute(text("ALTER TABLE cost_items ADD COLUMN test_count INTEGER DEFAULT 1"))
+    if "service_fee" not in cols:
+        db.execute(text("ALTER TABLE cost_items ADD COLUMN service_fee FLOAT DEFAULT 0"))
 
 
 def _seed_users(db):

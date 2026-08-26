@@ -145,9 +145,11 @@ class CostItemOut(BaseModel):
     power_fee: float
     depreciation_fee: float
     consumable_fee: float
-    count: int
+    test_time: float
+    test_count: int
     quantity: int
     discount: float
+    service_fee: float
     amount: float
 
 
@@ -219,7 +221,7 @@ class ReviewRequest(BaseModel):
     reviewer_id: int | None = None      # 实验员（可动态选择）
     reject_reason: str = ""
     required_start: datetime | None = None
-    costs: list[dict] = []              # 费用明细 [{test_item, equipment_id, count, quantity, discount}]
+    costs: list[dict] = []              # 费用明细 [{test_item, equipment_id, test_time, test_count, quantity, discount, service_fee}]
 
 
 # ---------------------------------------------------------------------------
