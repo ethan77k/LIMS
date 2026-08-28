@@ -41,6 +41,21 @@ def create_schedule(
     if equipment.status in ("停用", "报废"):
         raise HTTPException(400, "该设备已停用/报废，不可排期")
 
+    # 样品池样品（未绑单）需指定目标委托单并完成绑定
+    order = db.get(EntrustOrder, sample.order_id) if sample.order_id else None
+    if sample.order_id is None:
+        if not data.order_id:
+            raise HTTPException(400, "样品池样品排期需指定目标委托单")
+        order = db.get(EntrustOrder, data.order_id)
+        if order is None:
+            raise HTTPException(404, "目标委托单不存在")
+        if order.status not in ("已审核", "已排期", "实验中"):
+            raise HTTPException(400, "目标委托单状态不可排期")
+        sample.order_id = order.id
+
+    if sample.status not in ("已接收",):
+        raise HTTPException(400, f"样品当前状态（{sample.status}）不可排期")
+
     total = data.experiment_hours + data.transition_hours
     plan_start = data.plan_start
     plan_end = plan_start + timedelta(hours=total) if plan_start else None
@@ -53,13 +68,11 @@ def create_schedule(
     db.add(schedule)
 
     # 样品进入已排期
-    if sample.status in ("已接收",):
-        sample.status = "已排期"
+    sample.status = "已排期"
     db.add(SampleOperation(sample_id=sample.id, action="排期", operator=user.name,
                            remark=f"排期至 {equipment.name}，用时 {total} 小时"))
 
     # 委托单进入已排期
-    order = db.get(EntrustOrder, sample.order_id)
     if order and order.status == "已审核":
         order.status = "已排期"
 

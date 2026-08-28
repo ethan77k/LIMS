@@ -1003,173 +1003,338 @@ const ReviewView = {
   </div>`,
 };
 
-/* ---------------- 样品标签/领出单（Code39 离线自绘） ---------------- */
-const CODE39_TABLE = {
-  '0': 'nnnwwnwnn', '1': 'wnnwnnnnw', '2': 'nnwwnnnnw', '3': 'wnwwnnnnn', '4': 'nnnwwnnnw',
-  '5': 'wnnwwnnnn', '6': 'nnwwwnnnn', '7': 'nnnwnnwnw', '8': 'wnnwnnwnn', '9': 'nnwwnnwnn',
-  'A': 'wnnnnwnnw', 'B': 'nnwnnwnnw', 'C': 'wnwnnwnnn', 'D': 'nnnnwwnnw', 'E': 'wnnnwwnnn',
-  'F': 'nnwnwwnnn', 'G': 'nnnnnwwnw', 'H': 'wnnnnwwnn', 'I': 'nnwnnwwnn', 'J': 'nnnnwwwnn',
-  'K': 'wnnnnnnww', 'L': 'nnwnnnnww', 'M': 'wnwnnnnwn', 'N': 'nnnnwnnww', 'O': 'wnnnwnnwn',
-  'P': 'nnwnwnnwn', 'Q': 'nnnnnnwww', 'R': 'wnnnnnwwn', 'S': 'nnwnnnwwn', 'T': 'nnnnwnwwn',
-  'U': 'wwnnnnnnw', 'V': 'nwwnnnnnw', 'W': 'wwwnnnnnn', 'X': 'nwnnwnnnw', 'Y': 'wwnnwnnnn',
-  'Z': 'nwwnwnnnn', '-': 'nwnnnnwnw', '.': 'wwnnnnwnn', ' ': 'nwwnnnwnn', '$': 'nwnwnwnnn',
-  '/': 'nwnwnnnwn', '+': 'nwnnnwnwn', '%': 'nnnwnwnwn', '*': 'nwnnwnwnn',
-};
-function code39(text) {
-  const t = '*' + String(text).toUpperCase().replace(/[^0-9A-Z\-\.\ \$\/\+\%]/g, '') + '*';
-  let bars = '';
-  for (const c of t) {
-    const p = CODE39_TABLE[c];
-    if (!p) continue;
-    for (let i = 0; i < 9; i++) {
-      const wide = p[i] === 'w';
-      const el = i % 2 === 0 ? '1' : '0'; // 偶数位=条，奇数位=空
-      bars += el.repeat(wide ? 3 : 1);
-    }
-  }
-  // bars 是 '1/0' 字符串，1=黑条，0=白空（单位宽度 2px，宽窄比 3:1）
-  let svg = '', x = 0;
-  for (const b of bars) {
-    if (b === '1') svg += `<rect x="${x}" y="0" width="2" height="40" fill="#000"/>`;
-    x += 2;
-  }
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${x}" height="40">${svg}</svg>`;
-}
-function printSampleLabels(order, samples) {
+/* ---------------- 样品池二维码标签打印 ---------------- */
+function printBatchSampleLabels(batch, samples) {
+  const base = location.origin;
   const labels = samples.map(s => `
     <div class="label">
-      <div class="lbl-head">${escHtml(order.entrust_org) || '&nbsp;'}</div>
-      <div class="barcode">${code39(s.sample_no)}</div>
-      <div class="code">${escHtml(s.sample_no)}</div>
-      <div class="info">${escHtml(order.sample_model)}</div>
-      <div class="info">状况：${escHtml(s.condition) || '-'}　状态：${escHtml(s.status)}</div>
+      <img class="qr" src="${base}/q/${s.id}/qr.png" alt="二维码">
+      <div class="line">批次号：${escHtml(batch.batch_no)}</div>
+      <div class="line">状况：${escHtml(s.condition || '-')}</div>
+      <div class="line">样品编号：${escHtml(s.sample_no)}</div>
     </div>`).join('');
-  const w = window.open('', '_blank', 'width=720,height=820');
-  w.document.write(`<html><head><meta charset="utf-8"><title>样品标签/领出单</title><style>
+  const w = window.open('', '_blank', 'width=760,height=820');
+  w.document.write(`<html><head><meta charset="utf-8"><title>样品条码标签</title><style>
     body{font-family:'Microsoft YaHei',Arial,sans-serif;padding:24px}
-    .checkout{border:1px solid #000;padding:14px;margin-bottom:18px}
-    .checkout h3{margin:0 0 8px}.checkout p{margin:2px 0;font-size:13px}
-    .labels{display:flex;flex-wrap:wrap;gap:12px}
-    .label{border:1px solid #000;padding:10px 14px;width:210px;text-align:center}
-    .lbl-head{font-size:12px;margin-bottom:6px}
-    .barcode{display:inline-block}.code{font-family:monospace;font-size:13px;font-weight:700;letter-spacing:1px;margin-top:4px}
-    .info{font-size:11px;margin-top:3px}
+    .labels{display:flex;flex-wrap:wrap;gap:14px}
+    .label{border:1px solid #000;padding:14px;width:220px;text-align:center;page-break-inside:avoid}
+    .qr{width:180px;height:180px;display:block;margin:0 auto 10px}
+    .line{font-size:13px;margin-top:4px;font-weight:600}
     @media print{body{padding:0}}
   </style></head><body>
-    <div class="checkout"><h3>样品领出单</h3>
-      <p>实验编号：${escHtml(order.experiment_no || order.order_no)}　委托单位：${escHtml(order.entrust_org) || '-'}</p>
-      <p>领出人签字：＿＿＿＿＿＿　　/　　接收人签字：＿＿＿＿＿＿　　/　　日期：＿＿＿＿年＿＿月＿＿日</p>
-    </div>
     <div class="labels">${labels}</div>
-    <script>window.print()<\/script></body></html>`);
+    <script>window.onload=function(){window.print()};<\/script></body></html>`);
   w.document.close();
 }
 
-/* ---------------- 样品管理 ---------------- */
+/* ---------------- 样品管理（样品池） ---------------- */
 const SamplesView = {
-  data: () => ({ orders: [], cur: null, samples: [], detail: null, showModal: false, eq: [], retained: [], showReuse: false }),
+  data: () => ({
+    batches: [],
+    // 样品池
+    showBatchForm: false,
+    batchForm: { entrust_org: '', entruster: '', sample_name: '', sample_model: '', customer_model: '', unit: '台', sn_text: '', remark: '' },
+    expanded: {},
+    batchQuery: { batch_no: '', sn: '', sample_model: '', date_from: '', date_to: '' },
+    sampleDetail: null, showSampleDetail: false,
+    showSampleEdit: false, editId: null, editForm: { sn: '', status: '', condition: '' },
+    sampleStatuses: ['待接收', '已接收', '已排期', '实验中', '已完成', '已退还', '已报废', '已留存'],
+    showPrint: false, printBatch: null, printSampleId: null,
+  }),
   methods: {
-    async load() { this.orders = await api('/api/orders?status='); },
-    async open(o) { this.cur = o; this.detail = await api('/api/orders/' + o.id); this.samples = this.detail.samples; this.showModal = true; },
-    async receive(s) {
-      const c = prompt('样品检查状况（默认：样品正常）', '样品正常') || '样品正常';
-      await api('/api/samples/' + s.id + '/receive', 'POST', { condition: c });
-      this.open(this.cur); toast('已接收', 'success');
-    },
-    async dispose(s, action) {
-      const r = prompt('备注', '') || '';
-      await api('/api/samples/' + s.id + '/dispose', 'POST', { action, remark: r });
-      this.open(this.cur); toast('已' + action, 'success');
-    },
-    async addSample() {
+    async load() { this.loadBatches(); },
+    async loadBatches() { this.batches = await api('/api/samples/batches'); },
+    // ---- 样品池 ----
+    openBatchForm() { this.batchForm = { entrust_org: '', entruster: '', sample_name: '', sample_model: '', customer_model: '', unit: '台', sn_text: '', remark: '' }; this.showBatchForm = true; },
+    async createBatch() {
       try {
-        await api('/api/samples', 'POST', { order_id: this.cur.id });
-        this.open(this.cur); toast('已新增样品（补样）', 'success');
+        const sn_list = this.batchForm.sn_text.split(/[\n\r,，;；\s]+/).map(s => s.trim()).filter(Boolean);
+        if (!sn_list.length) { toast('请粘贴 SN 列表', 'error'); return; }
+        const { sn_text, ...payload } = this.batchForm;
+        await api('/api/samples/batches', 'POST', { ...payload, sn_list });
+        this.showBatchForm = false; this.loadBatches(); toast('批次已录入', 'success');
       } catch (e) { toast(e.message, 'error'); }
     },
-    async openReuse() {
-      this.retained = await api('/api/samples?status=' + encodeURIComponent('已留存'));
-      this.showReuse = true;
+    toggleBatch(b) { this.expanded[b.id] = !this.expanded[b.id]; },
+    async confirmBatch(b) {
+      const c = prompt('确认状况（默认：样品正常）', '样品正常');
+      if (c === null) return; // 用户取消，不确认
+      try { await api('/api/samples/batches/' + b.id + '/confirm', 'POST', { condition: c.trim() || '样品正常' }); this.loadBatches(); toast('整批已确认', 'success'); }
+      catch (e) { toast(e.message, 'error'); }
     },
-    async reuse(src) {
+    async disposeBatch(b, action) {
+      const r = prompt('备注', '');
+      if (r === null) return; // 用户取消，不处置
+      try { await api('/api/samples/batches/' + b.id + '/dispose', 'POST', { action, remark: r.trim() }); this.loadBatches(); toast('整批已' + action, 'success'); }
+      catch (e) { toast(e.message, 'error'); }
+    },
+    async confirmSample(s) {
+      const c = prompt('确认状况（默认：样品正常）', '样品正常');
+      if (c === null) return; // 用户取消，不确认
+      try { await api('/api/samples/' + s.id + '/receive', 'POST', { condition: c.trim() || '样品正常' }); this.loadBatches(); toast('已确认', 'success'); }
+      catch (e) { toast(e.message, 'error'); }
+    },
+    async disposeSample(s, action) {
+      const r = prompt('备注', '');
+      if (r === null) return; // 用户取消，不处置
+      try { await api('/api/samples/' + s.id + '/dispose', 'POST', { action, remark: r.trim() }); this.loadBatches(); toast('已' + action, 'success'); }
+      catch (e) { toast(e.message, 'error'); }
+    },
+    openSampleEdit(s) {
+      this.editId = s.id;
+      this.editForm = { sn: s.sn || '', status: s.status, condition: s.condition || '' };
+      this.showSampleEdit = true;
+    },
+    async saveSampleEdit() {
       try {
-        await api('/api/samples', 'POST', { order_id: this.cur.id, source_sample_id: src.id });
-        this.showReuse = false; this.open(this.cur); toast('已复用留存样品', 'success');
+        await api('/api/samples/' + this.editId + '/update', 'POST', { ...this.editForm });
+        this.showSampleEdit = false; this.loadBatches(); toast('已保存', 'success');
       } catch (e) { toast(e.message, 'error'); }
     },
-    printLabels() { printSampleLabels(this.detail, this.samples); },
+    async openSampleDetail(s) {
+      try {
+        this.sampleDetail = await api('/api/samples/' + s.id + '/history');
+        this.showSampleDetail = true;
+      } catch (e) { toast(e.message, 'error'); }
+    },
+    batchStatus(b) {
+      const samples = b.samples || [];
+      const wait = samples.filter(s => s.status === '待接收').length;
+      const ok = samples.filter(s => s.status === '已接收').length;
+      const done = samples.filter(s => ['已退还', '已报废', '已留存'].includes(s.status)).length;
+      return `待确认 ${wait} · 已确认 ${ok} · 已处置 ${done}`;
+    },
+    resetBatchQuery() { this.batchQuery = { batch_no: '', sn: '', sample_model: '', date_from: '', date_to: '' }; },
+    openPrint(b) { this.printBatch = b; this.printSampleId = null; this.showPrint = true; },
+    printBatchAll() { printBatchSampleLabels(this.printBatch, this.printBatch.samples); this.showPrint = false; },
+    printSingle() {
+      const s = (this.printBatch.samples || []).find(x => x.id === this.printSampleId);
+      if (!s) { toast('请选择要打印的样品', 'error'); return; }
+      printBatchSampleLabels(this.printBatch, [s]);
+      this.showPrint = false;
+    },
     badge, fmtDT,
+  },
+  computed: {
+    filteredBatches() {
+      const q = this.batchQuery;
+      return this.batches.filter(b => {
+        if (q.batch_no && !(b.batch_no || '').toLowerCase().includes(q.batch_no.toLowerCase())) return false;
+        if (q.sample_model && !(b.sample_model || '').toLowerCase().includes(q.sample_model.toLowerCase())) return false;
+        if (q.sn && !(b.samples || []).some(s => (s.sn || '').toLowerCase().includes(q.sn.toLowerCase()))) return false;
+        const day = (b.created_at || '').slice(0, 10);
+        if (q.date_from && day < q.date_from) return false;
+        if (q.date_to && day > q.date_to) return false;
+        return true;
+      });
+    },
   },
   mounted() { this.load(); },
   template: `
   <div class="card">
     <h3>样品管理</h3>
-    <table class="tbl"><thead><tr><th>实验编号</th><th>委托单位</th><th>数量</th><th>状态</th><th>操作</th></tr></thead>
-    <tbody>
-      <template v-for="o in orders" :key="o.id">
-        <tr v-if="o.status!=='待审核' && o.status!=='已否决'">
-          <td>{{o.experiment_no||o.order_no}}</td><td>{{o.entrust_org}}</td><td>{{o.sample_count}}</td>
-          <td v-html="badge(o.status)"></td><td><button class="btn primary sm" @click="open(o)">样品管理</button></td>
-        </tr>
-      </template>
-      <tr v-if="!orders.length"><td colspan="5" class="empty">暂无委托单</td></tr>
-    </tbody></table>
-  </div>
-  <div class="modal-mask" v-if="showModal" @click.self="showModal=false">
-    <div class="modal" style="width:900px">
-      <h3>样品列表 —— {{cur.experiment_no||cur.order_no}}</h3>
-      <div style="margin-bottom:10px">
-        <button class="btn sm" @click="addSample">＋ 补样</button>
-        <button class="btn sm" @click="openReuse">复用留存样品</button>
-        <button class="btn primary sm" @click="printLabels">打印条码/领出单</button>
+
+    <!-- 样品池 -->
+    <div>
+      <div class="toolbar" style="margin-top:12px">
+        <button class="btn primary" @click="openBatchForm">＋ 新建批次（批量录 SN）</button>
+        <span style="margin-left:auto;color:var(--muted);font-size:13px">样品查询：</span>
+        <input v-model="batchQuery.batch_no" placeholder="批次号" style="width:130px">
+        <input v-model="batchQuery.sn" placeholder="SN 号" style="width:140px">
+        <input v-model="batchQuery.sample_model" placeholder="DHD型号" style="width:130px">
+        <input type="date" v-model="batchQuery.date_from" title="录入日期从" style="width:150px">
+        <span style="color:var(--muted)">至</span>
+        <input type="date" v-model="batchQuery.date_to" title="录入日期至" style="width:150px">
+        <button class="btn sm" @click="resetBatchQuery">重置</button>
       </div>
-      <table class="tbl"><thead><tr><th>样品编号</th><th>状态</th><th>状况</th><th>结果</th><th>备注</th><th>操作</th></tr></thead>
-      <tbody>
-        <tr v-for="s in samples" :key="s.id">
-          <td>{{s.sample_no}}</td><td v-html="badge(s.status, {'待接收':'gray','已接收':'blue','已排期':'purple','实验中':'orange','已完成':'green','已退还':'gray','已报废':'red','已留存':'green'})"></td>
-          <td>{{s.condition}}</td><td>{{s.result||'-'}}</td><td>{{s.remark}}</td>
-          <td>
-            <button class="btn success sm" v-if="s.status==='待接收'" @click="receive(s)">接收</button>
-            <button class="btn sm" v-if="['已完成','实验中','已接收'].includes(s.status)" @click="dispose(s,'退还')">退还</button>
-            <button class="btn sm" v-if="['已完成','实验中','已接收'].includes(s.status)" @click="dispose(s,'报废')">报废</button>
-            <button class="btn sm" v-if="['已完成','实验中','已接收'].includes(s.status)" @click="dispose(s,'留存')">留存</button>
-            <details style="display:inline-block" v-if="s.operations&&s.operations.length"><summary style="cursor:pointer;color:#1e5aa8">明细</summary>
-              <div style="position:absolute;background:#fff;border:1px solid #e2e8f0;padding:8px;border-radius:6px;z-index:10;max-height:200px;overflow:auto">
-                <div v-for="op in s.operations" :key="op.id" style="font-size:12px;padding:2px 0">{{fmtDT(op.created_at)}} {{op.action}} · {{op.operator}} {{op.remark}}</div>
-              </div>
-            </details>
-          </td>
-        </tr>
-      </tbody></table>
-      <div class="modal-actions"><button class="btn" @click="showModal=false">关闭</button></div>
+      <table class="tbl"><thead><tr><th>批次号</th><th>来源单位</th><th>样品名称/型号</th><th>数量</th><th>录入人</th><th>录入时间</th><th>状态</th><th>操作</th></tr></thead>
+        <tbody>
+          <template v-for="b in filteredBatches" :key="b.id">
+            <tr @click="toggleBatch(b)" style="cursor:pointer">
+              <td>{{b.batch_no}}</td>
+              <td>{{b.entrust_org||'-'}}<div v-if="b.entruster" style="font-size:12px;color:var(--muted)">委托人：{{b.entruster}}</div></td>
+              <td>{{b.sample_name||'-'}} / {{b.sample_model||'-'}}</td>
+              <td>{{b.quantity}}{{b.unit}}</td>
+              <td>{{b.operator}}</td>
+              <td>{{fmtDT(b.created_at)}}</td>
+              <td style="font-size:12px;color:var(--muted)">{{batchStatus(b)}}</td>
+              <td><button class="btn sm" @click.stop="toggleBatch(b)">{{expanded[b.id] ? '收起 ▲' : '展开 ▼'}}</button></td>
+            </tr>
+            <tr v-if="expanded[b.id]">
+              <td colspan="8" style="background:#f7f9fc;padding:12px">
+                <div style="margin-bottom:8px">
+                  <button class="btn success sm" @click="confirmBatch(b)">整批确认</button>
+                  <button class="btn sm" @click="disposeBatch(b,'退还')">整批退还</button>
+                  <button class="btn sm" @click="disposeBatch(b,'报废')">整批报废</button>
+                  <button class="btn sm" @click="disposeBatch(b,'留存')">整批留存</button>
+                  <button class="btn sm" @click="openPrint(b)">打印条码</button>
+                </div>
+                <table class="tbl"><thead><tr><th>SN</th><th>样品编号</th><th>状态</th><th>状况</th><th>结果</th><th>备注</th><th>操作</th></tr></thead>
+                  <tbody>
+                    <tr v-for="s in b.samples" :key="s.id">
+                      <td>{{s.sn||'-'}}</td>
+                      <td>{{s.sample_no}}</td>
+                      <td v-html="badge(s.status, {'待接收':'gray','已接收':'blue','已排期':'purple','实验中':'orange','已完成':'green','已退还':'gray','已报废':'red','已留存':'green'})"></td>
+                      <td>{{s.condition}}</td>
+                      <td>{{s.result||'-'}}</td>
+                      <td>{{s.remark}}</td>
+                      <td>
+                        <button class="btn success sm" v-if="s.status==='待接收'" @click="confirmSample(s)">确认</button>
+                        <button class="btn sm" v-if="['已完成','实验中','已接收'].includes(s.status)" @click="disposeSample(s,'退还')">退还</button>
+                        <button class="btn sm" v-if="['已完成','实验中','已接收'].includes(s.status)" @click="disposeSample(s,'报废')">报废</button>
+                        <button class="btn sm" v-if="['已完成','实验中','已接收'].includes(s.status)" @click="disposeSample(s,'留存')">留存</button>
+                        <button class="btn link sm" @click="openSampleEdit(s)">编辑</button>
+                        <button class="btn link sm" @click="openSampleDetail(s)">明细</button>
+                      </td>
+                    </tr>
+                    <tr v-if="!b.samples.length"><td colspan="7" class="empty">暂无样品</td></tr>
+                  </tbody></table>
+              </td>
+            </tr>
+          </template>
+          <tr v-if="!filteredBatches.length"><td colspan="8" class="empty">{{ batches.length ? '没有符合查询条件的批次' : '暂无批次，点击上方「新建批次」录入' }}</td></tr>
+        </tbody></table>
     </div>
   </div>
-  <div class="modal-mask" v-if="showReuse" @click.self="showReuse=false">
+
+  <!-- 新建批次 -->
+  <div class="modal-mask" v-if="showBatchForm" @click.self="showBatchForm=false">
     <div class="modal" style="width:640px">
-      <h3>复用留存样品 —— 选择样品并入 {{cur.experiment_no||cur.order_no}}</h3>
-      <table class="tbl"><thead><tr><th>样品编号</th><th>状况</th><th>备注</th><th></th></tr></thead>
-      <tbody>
-        <tr v-for="s in retained" :key="s.id">
-          <td>{{s.sample_no}}</td><td>{{s.condition||'-'}}</td><td>{{s.remark||'-'}}</td>
-          <td><button class="btn primary sm" @click="reuse(s)">复用</button></td>
-        </tr>
-        <tr v-if="!retained.length"><td colspan="4" class="empty">暂无留存样品</td></tr>
-      </tbody></table>
-      <div class="modal-actions"><button class="btn" @click="showReuse=false">关闭</button></div>
+      <h3>新建样品批次</h3>
+      <div class="form-row">
+        <div class="form-group"><label>来源委托单位</label><input v-model="batchForm.entrust_org"></div>
+        <div class="form-group"><label>委托人</label><input v-model="batchForm.entruster"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>样品名称</label><input v-model="batchForm.sample_name"></div>
+        <div class="form-group"><label>DHD型号</label><input v-model="batchForm.sample_model"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>客户型号</label><input v-model="batchForm.customer_model"></div>
+        <div class="form-group" style="flex:0 0 90px"><label>单位</label><input v-model="batchForm.unit"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>备注</label><input v-model="batchForm.remark"></div>
+      </div>
+      <div class="form-group">
+        <label>SN 列表（每行一个，或逗号/空格分隔）</label>
+        <textarea v-model="batchForm.sn_text" rows="6" placeholder="粘贴 SN，每行一个，如：&#10;SN20260828001&#10;SN20260828002"></textarea>
+      </div>
+      <div class="modal-actions">
+        <button class="btn" @click="showBatchForm=false">取消</button>
+        <button class="btn primary" @click="createBatch">录入批次</button>
+      </div>
     </div>
-  </div>`,
+  </div>
+
+  <!-- 样品编辑 -->
+  <div class="modal-mask" v-if="showSampleEdit" @click.self="showSampleEdit=false">
+    <div class="modal" style="width:480px">
+      <h3>编辑样品</h3>
+      <div class="form-group"><label>SN</label><input v-model="editForm.sn" placeholder="SN 序列号"></div>
+      <div class="form-group"><label>状态</label><select v-model="editForm.status">
+        <option v-for="st in sampleStatuses" :key="st" :value="st">{{st}}</option>
+      </select></div>
+      <div class="form-group"><label>状况</label><input v-model="editForm.condition" placeholder="如：样品正常"></div>
+      <div class="modal-actions">
+        <button class="btn" @click="showSampleEdit=false">取消</button>
+        <button class="btn primary" @click="saveSampleEdit">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 样品明细 -->
+  <div class="modal-mask" v-if="showSampleDetail && sampleDetail" @click.self="showSampleDetail=false">
+    <div class="modal" style="width:960px">
+      <h3>样品明细 —— {{sampleDetail.sample_no}}</h3>
+      <div style="color:var(--muted);font-size:12px;margin-bottom:14px">
+        SN {{sampleDetail.sn||'-'}} · 批次 {{sampleDetail.batch_no||'无'}} · 状态 <span v-html="badge(sampleDetail.status, {'待接收':'gray','已接收':'blue','已排期':'purple','实验中':'orange','已完成':'green','已退还':'gray','已报废':'red','已留存':'green'})"></span>
+      </div>
+
+      <div v-if="sampleDetail.order" style="margin-bottom:16px">
+        <div style="font-weight:600;margin-bottom:6px">关联委托单</div>
+        <table class="tbl"><thead><tr><th>实验编号</th><th>委托单号</th><th>委托单位</th><th>检测项目</th><th>状态</th></tr></thead>
+          <tbody><tr>
+            <td>{{sampleDetail.order.experiment_no||'-'}}</td>
+            <td>{{sampleDetail.order.order_no||'-'}}</td>
+            <td>{{sampleDetail.order.entrust_org||'-'}}</td>
+            <td>{{sampleDetail.order.test_item||'-'}}</td>
+            <td v-html="badge(sampleDetail.order.status)"></td>
+          </tr></tbody></table>
+      </div>
+
+      <div style="margin-bottom:16px">
+        <div style="font-weight:600;margin-bottom:6px">实验信息（排期）</div>
+        <table class="tbl"><thead><tr><th>设备</th><th>实验用时(h)</th><th>过渡用时(h)</th><th>总用时(h)</th><th>预计开始</th><th>预计结束</th><th>实际开始</th><th>实际结束</th><th>状态</th></tr></thead>
+          <tbody>
+            <tr v-for="sc in sampleDetail.schedules" :key="sc.id">
+              <td>{{sc.equipment_name}}</td>
+              <td>{{sc.experiment_hours}}</td>
+              <td>{{sc.transition_hours}}</td>
+              <td>{{sc.total_hours}}</td>
+              <td>{{fmtDT(sc.plan_start)}}</td>
+              <td>{{fmtDT(sc.plan_end)}}</td>
+              <td>{{fmtDT(sc.actual_start)}}</td>
+              <td>{{fmtDT(sc.actual_end)}}</td>
+              <td v-html="badge(sc.status)"></td>
+            </tr>
+            <tr v-if="!sampleDetail.schedules.length"><td colspan="9" class="empty">暂无实验排期</td></tr>
+          </tbody></table>
+      </div>
+
+      <div>
+        <div style="font-weight:600;margin-bottom:6px">操作记录（全部变动）</div>
+        <table class="tbl"><thead><tr><th>时间</th><th>操作</th><th>操作人</th><th>备注</th></tr></thead>
+          <tbody>
+            <tr v-for="op in sampleDetail.operations" :key="op.id">
+              <td>{{fmtDT(op.created_at)}}</td>
+              <td>{{op.action}}</td>
+              <td>{{op.operator}}</td>
+              <td>{{op.remark}}</td>
+            </tr>
+            <tr v-if="!sampleDetail.operations.length"><td colspan="4" class="empty">暂无操作记录</td></tr>
+          </tbody></table>
+      </div>
+
+      <div class="modal-actions"><button class="btn" @click="showSampleDetail=false">关闭</button></div>
+    </div>
+  </div>
+
+  <!-- 打印条码 -->
+  <div class="modal-mask" v-if="showPrint && printBatch" @click.self="showPrint=false">
+    <div class="modal" style="width:480px">
+      <h3>打印条码 —— {{printBatch.batch_no}}</h3>
+      <p style="color:var(--muted);font-size:12px;margin:0 0 14px">共 {{printBatch.samples.length}} 台样品，可批量打印或选择单台打印。</p>
+      <div style="margin-bottom:12px">
+        <button class="btn primary" @click="printBatchAll">批量打印（全部 {{printBatch.samples.length}} 台）</button>
+      </div>
+      <div class="form-group">
+        <label>单台打印</label>
+        <select v-model="printSampleId">
+          <option :value="null" disabled>请选择样品</option>
+          <option v-for="s in printBatch.samples" :key="s.id" :value="s.id">{{s.sample_no}} · SN {{s.sn||'-'}}</option>
+        </select>
+      </div>
+      <div class="modal-actions">
+        <button class="btn" @click="showPrint=false">取消</button>
+        <button class="btn primary" @click="printSingle">单台打印</button>
+      </div>
+    </div>
+  </div>
+
+  `,
 };
 
 /* ---------------- 实验排期 ---------------- */
 const ScheduleView = {
-  data: () => ({ orders: [], cur: null, detail: null, eq: [], showModal: false, form: { sample_id: null, equipment_id: null, experiment_hours: 4, transition_hours: 0, plan_start: '' } }),
+  data: () => ({ orders: [], cur: null, detail: null, eq: [], poolSamples: [], showModal: false, form: { sample_id: null, equipment_id: null, experiment_hours: 4, transition_hours: 0, plan_start: '' } }),
   methods: {
     async load() { this.orders = await api('/api/orders?status='); this.eq = await api('/api/equipment'); },
-    async open(o) { this.cur = o; this.detail = await api('/api/orders/' + o.id); this.showModal = true; },
+    async open(o) { this.cur = o; this.detail = await api('/api/orders/' + o.id); this.poolSamples = await api('/api/samples?unbound=true&status=' + encodeURIComponent('已接收')); this.showModal = true; },
     async addSchedule() {
       try {
         if (!this.form.sample_id || !this.form.equipment_id) { toast('请选择样品和设备', 'error'); return; }
-        await api('/api/schedules', 'POST', { ...this.form, experiment_hours: Number(this.form.experiment_hours), transition_hours: Number(this.form.transition_hours) });
+        await api('/api/schedules', 'POST', { ...this.form, experiment_hours: Number(this.form.experiment_hours), transition_hours: Number(this.form.transition_hours), order_id: this.cur.id });
         toast('排期成功', 'success'); this.open(this.cur);
       } catch (e) { toast(e.message, 'error'); }
     },
@@ -1195,7 +1360,9 @@ const ScheduleView = {
       <h3>样品排期 —— {{cur.experiment_no||cur.order_no}}</h3>
       <div class="form-row" style="background:#f7f9fc;padding:12px;border-radius:6px">
         <div class="form-group"><label>样品</label><select v-model="form.sample_id">
-          <option :value="null">选择样品</option><option v-for="s in detail.samples" :value="s.id" :disabled="s.status!=='已接收'">{{s.sample_no}}（{{s.status}}）</option>
+          <option :value="null">选择样品</option>
+          <optgroup label="本委托单样品"><option v-for="s in detail.samples" :value="s.id" :disabled="s.status!=='已接收'">{{s.sample_no}}（{{s.status}}）</option></optgroup>
+          <optgroup label="样品池样品"><option v-for="s in poolSamples" :value="s.id">{{s.sample_no}} · SN {{s.sn}}</option></optgroup>
         </select></div>
         <div class="form-group"><label>设备</label><select v-model="form.equipment_id">
           <option :value="null">选择设备</option><option v-for="e in eq" :value="e.id" :disabled="e.status!=='可用'">{{e.name}}（{{e.exp_type}}）</option>

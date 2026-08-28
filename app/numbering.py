@@ -11,7 +11,7 @@ from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from .models import EntrustOrder, Report, Sample
+from .models import EntrustOrder, Report, Sample, SampleBatch
 
 
 def retry_on_number_conflict(db: Session, fn, attempts: int = 3):
@@ -74,12 +74,6 @@ def max_sample_seq(db: Session, experiment_no: str) -> int:
         return 0
 
 
-def next_sample_no(db: Session, experiment_no: str, existing_count: int) -> str:
-    """样品编号 = 实验编号 + '-' + 两位流水（全局按实验编号计数）。"""
-    current = max(existing_count, max_sample_seq(db, experiment_no))
-    return f"{experiment_no}-{current + 1:02d}"
-
-
 def next_report_no(db: Session) -> str:
     """报告编号：BG{YYMM}-四位流水，如 BG2608-0001。"""
     prefix = "BG" + datetime.now().strftime("%y%m")
@@ -95,3 +89,36 @@ def next_report_no(db: Session) -> str:
         except (ValueError, IndexError):
             current = 0
     return f"{prefix}-{current + 1:04d}"
+
+
+def next_batch_no(db: Session) -> str:
+    """样品批次号：PC{YYMM}-四位流水，如 PC2608-0001。"""
+    prefix = "PC" + datetime.now().strftime("%y%m")
+    row = (
+        db.query(func.max(SampleBatch.batch_no))
+        .filter(SampleBatch.batch_no.like(f"{prefix}-%"))
+        .scalar()
+    )
+    current = 0
+    if row:
+        try:
+            current = int(row.rsplit("-", 1)[1])
+        except (ValueError, IndexError):
+            current = 0
+    return f"{prefix}-{current + 1:04d}"
+
+
+def next_pool_sample_no(db: Session, batch_no: str) -> str:
+    """池样品编号 = 批次号 + '-' + 两位流水，如 PC2608-0001-01。"""
+    row = (
+        db.query(func.max(Sample.sample_no))
+        .filter(Sample.sample_no.like(f"{batch_no}-%"))
+        .scalar()
+    )
+    current = 0
+    if row:
+        try:
+            current = int(row.rsplit("-", 1)[1])
+        except (ValueError, IndexError):
+            current = 0
+    return f"{batch_no}-{current + 1:02d}"

@@ -10,12 +10,24 @@ def sample_to_dict(s) -> dict:
     return {
         "id": s.id, "sample_no": s.sample_no, "order_id": s.order_id,
         "status": s.status, "condition": s.condition, "result": s.result, "remark": s.remark,
+        "sn": s.sn, "batch_id": s.batch_id,
+        "batch_no": s.batch.batch_no if s.batch else "",
         "created_at": _dt(s.created_at),
         "operations": [
             {"id": o.id, "action": o.action, "operator": o.operator,
              "remark": o.remark, "created_at": _dt(o.created_at)}
             for o in sorted(s.operations, key=lambda x: x.id)
         ],
+    }
+
+
+def batch_to_dict(b) -> dict:
+    return {
+        "id": b.id, "batch_no": b.batch_no, "entrust_org": b.entrust_org, "entruster": b.entruster,
+        "sample_name": b.sample_name, "sample_model": b.sample_model,
+        "customer_model": b.customer_model, "quantity": b.quantity, "unit": b.unit,
+        "operator": b.operator, "remark": b.remark, "created_at": _dt(b.created_at),
+        "samples": [sample_to_dict(s) for s in sorted(b.samples, key=lambda x: x.id)],
     }
 
 

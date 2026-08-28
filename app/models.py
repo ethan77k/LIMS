@@ -106,18 +106,43 @@ class Sample(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     sample_no: Mapped[str] = mapped_column(String(40), unique=True, index=True)  # 样品编号
-    order_id: Mapped[int] = mapped_column(ForeignKey("entrust_orders.id"), index=True)
-    order: Mapped["EntrustOrder"] = relationship("EntrustOrder", back_populates="samples")
+    # 池样品未绑单前 order_id 为空；排期时再关联委托单
+    order_id: Mapped[int | None] = mapped_column(ForeignKey("entrust_orders.id"), nullable=True, index=True)
+    order: Mapped["EntrustOrder | None"] = relationship("EntrustOrder", back_populates="samples")
 
     # 状态：待接收 / 已接收 / 已排期 / 实验中 / 已完成 / 已退还 / 已报废 / 已留存
     status: Mapped[str] = mapped_column(String(16), default="待接收", index=True)
     condition: Mapped[str] = mapped_column(String(64), default="未检查")   # 样品状况
     result: Mapped[str] = mapped_column(String(8), default="")             # 实验结果 OK / NG
     remark: Mapped[str] = mapped_column(Text, default="")
+    sn: Mapped[str | None] = mapped_column(String(64), nullable=True, default=None)  # 实物序列号（全局唯一，应用层校验）
+    batch_id: Mapped[int | None] = mapped_column(ForeignKey("sample_batches.id"), nullable=True, index=True)
+    batch: Mapped["SampleBatch | None"] = relationship("SampleBatch", back_populates="samples")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
 
     operations: Mapped[list["SampleOperation"]] = relationship(
         "SampleOperation", back_populates="sample", cascade="all, delete-orphan")
+
+
+class SampleBatch(Base):
+    """样品批次（样品池分组）：一次送样/入库的一批样品。"""
+
+    __tablename__ = "sample_batches"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    batch_no: Mapped[str] = mapped_column(String(40), unique=True, index=True)   # 批次号 PC{YYMM}-四位
+    entrust_org: Mapped[str] = mapped_column(String(128), default="")            # 来源委托单位
+    entruster: Mapped[str] = mapped_column(String(64), default="")               # 委托人
+    sample_name: Mapped[str] = mapped_column(String(128), default="")            # 样品名称
+    sample_model: Mapped[str] = mapped_column(String(128), default="")           # 样品型号
+    customer_model: Mapped[str] = mapped_column(String(128), default="")         # 客户型号
+    quantity: Mapped[int] = mapped_column(Integer, default=0)                    # 录入数量
+    unit: Mapped[str] = mapped_column(String(16), default="台")
+    operator: Mapped[str] = mapped_column(String(64), default="")                # 录入人
+    remark: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+
+    samples: Mapped[list["Sample"]] = relationship("Sample", back_populates="batch")
 
 
 # ---------------------------------------------------------------------------

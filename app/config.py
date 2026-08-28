@@ -1,5 +1,6 @@
 """全局配置。"""
 import os
+import socket
 from pathlib import Path
 
 # 项目根目录
@@ -23,3 +24,20 @@ UPLOAD_DIR = STATIC_DIR / "uploads"
 COMPANY_NAME = os.getenv("LIMS_COMPANY_NAME", "得辉达集团")
 COMPANY_NAME_EN = os.getenv("LIMS_COMPANY_NAME_EN", "")
 LOGO_PATH = STATIC_DIR / "logo.png"
+
+
+def _lan_ip() -> str:
+    """探测本机局域网 IP（UDP 连接不实际发包，无需外网）。"""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "127.0.0.1"
+
+
+# 二维码扫码后跳转的公开基址：手机需与服务器同网段，默认自动探测局域网 IP。
+# 可通过环境变量 LIMS_PUBLIC_URL 覆盖（如 "http://192.168.1.10:8000"）。
+PUBLIC_BASE_URL = os.getenv("LIMS_PUBLIC_URL", "").rstrip("/") or f"http://{_lan_ip()}:8000"

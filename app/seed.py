@@ -3,6 +3,8 @@
 设备计价标准来源于公司内部《可靠性测试报价表-20260721.xlsx》
 （计费标准 + 计费明细 两个 Sheet 合并）。
 """
+import sqlite3
+
 from sqlalchemy import text
 
 from .database import Base, SessionLocal, engine
@@ -12,6 +14,7 @@ from .security import hash_password
 
 def init_db():
     Base.metadata.create_all(bind=engine)
+    _migrate_samples_rebuild()  # 需先于任何 Session 事务执行（samples 表重建）
     db = SessionLocal()
     try:
         _seed_users(db)
@@ -22,9 +25,61 @@ def init_db():
         _migrate_order_case_id(db)
         _migrate_entruster_user_id(db)
         _migrate_cost_fields(db)
+        _migrate_sample_batches_entruster(db)
         db.commit()
     finally:
         db.close()
+
+
+def _migrate_samples_rebuild():
+    """samples 表重建：order_id 改可空 + 新增 sn / batch_id 列（幂等）。
+
+    SQLite 的 ALTER TABLE 无法修改列约束，故整表重建；用 raw sqlite3
+    连接关闭外键约束后执行，重建完成后恢复。仅在 samples 尚无 sn 列时执行一次。
+    """
+    if engine.url.get_backend_name() != "sqlite":
+        return
+    path = engine.url.database
+    conn = sqlite3.connect(path)
+    try:
+        cols = [row[1] for row in conn.execute("PRAGMA table_info(samples)").fetchall()]
+        if "sn" in cols:
+            return
+        conn.execute("PRAGMA foreign_keys=OFF")
+        conn.execute("BEGIN")
+        try:
+            conn.execute(
+                "CREATE TABLE samples_new ("
+                "id INTEGER NOT NULL PRIMARY KEY,"
+                "sample_no VARCHAR(40) NOT NULL,"
+                "order_id INTEGER,"
+                "status VARCHAR(16) NOT NULL,"
+                "condition VARCHAR(64) NOT NULL,"
+                "result VARCHAR(8) NOT NULL,"
+                "remark TEXT NOT NULL,"
+                "sn VARCHAR(64),"
+                "batch_id INTEGER,"
+                "created_at DATETIME NOT NULL"
+                ")"
+            )
+            conn.execute(
+                "INSERT INTO samples_new (id, sample_no, order_id, status, condition, result, remark, created_at) "
+                "SELECT id, sample_no, order_id, status, condition, result, remark, created_at FROM samples"
+            )
+            conn.execute("DROP TABLE samples")
+            conn.execute("ALTER TABLE samples_new RENAME TO samples")
+            conn.execute("CREATE INDEX ix_samples_id ON samples (id)")
+            conn.execute("CREATE INDEX ix_samples_order_id ON samples (order_id)")
+            conn.execute("CREATE INDEX ix_samples_status ON samples (status)")
+            conn.execute("CREATE UNIQUE INDEX ix_samples_sample_no ON samples (sample_no)")
+            conn.execute("CREATE INDEX ix_samples_batch_id ON samples (batch_id)")
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+    finally:
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.close()
 
 
 def _migrate_notifications(db):
@@ -90,6 +145,13 @@ def _migrate_cost_fields(db):
         db.execute(text("ALTER TABLE cost_items ADD COLUMN test_count INTEGER DEFAULT 1"))
     if "service_fee" not in cols:
         db.execute(text("ALTER TABLE cost_items ADD COLUMN service_fee FLOAT DEFAULT 0"))
+
+
+def _migrate_sample_batches_entruster(db):
+    """为 sample_batches 增加 entruster（委托人）列（幂等）。"""
+    cols = [row[1] for row in db.execute(text("PRAGMA table_info(sample_batches)"))]
+    if "entruster" not in cols:
+        db.execute(text("ALTER TABLE sample_batches ADD COLUMN entruster VARCHAR(64) DEFAULT ''"))
 
 
 def _seed_users(db):

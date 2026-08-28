@@ -128,11 +128,13 @@ class SampleOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
     sample_no: str
-    order_id: int
+    order_id: int | None
     status: str
     condition: str
     result: str
     remark: str
+    sn: str | None = None
+    batch_id: int | None = None
 
 
 class CostItemOut(BaseModel):
@@ -230,6 +232,7 @@ class ReviewRequest(BaseModel):
 class SampleReceiveRequest(BaseModel):
     condition: str = "样品正常"
     remark: str = ""
+    sn: str | None = None       # 确认时补充/核对 SN
 
 
 class SampleDisposeRequest(BaseModel):
@@ -242,10 +245,50 @@ class SampleOperationRequest(BaseModel):
     remark: str = ""
 
 
-class SampleCreateRequest(BaseModel):
-    """新增样品（补样 / 复用留存样品）。"""
-    order_id: int
-    source_sample_id: int | None = None  # 复用留存样品时传入
+class SampleSNUpdateRequest(BaseModel):
+    """补录 / 修改样品 SN 号。"""
+    sn: str
+
+
+class SampleUpdateRequest(BaseModel):
+    """编辑样品字段（SN / 状态 / 状况），未传的字段不修改。"""
+    sn: str | None = None
+    status: str | None = None
+    condition: str | None = None
+
+
+class SampleBatchCreate(BaseModel):
+    """新建样品批次并批量录入带 SN 的样品。"""
+    entrust_org: str = ""
+    entruster: str = ""
+    sample_name: str = ""
+    sample_model: str = ""
+    customer_model: str = ""
+    unit: str = "台"
+    sn_list: list[str] = []    # 批量 SN 列表（逐条生成样品）
+    remark: str = ""
+
+
+class SampleBatchOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    batch_no: str
+    entrust_org: str
+    entruster: str
+    sample_name: str
+    sample_model: str
+    customer_model: str
+    quantity: int
+    unit: str
+    operator: str
+    remark: str
+    created_at: datetime
+    samples: list[SampleOut] = []
+
+
+class SampleBatchConfirmRequest(BaseModel):
+    condition: str = "样品正常"
+    remark: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -257,6 +300,7 @@ class ScheduleCreate(BaseModel):
     experiment_hours: float = 0.0
     transition_hours: float = 0.0
     plan_start: datetime | None = None
+    order_id: int | None = None     # 池样品排期时指定目标委托单
 
 
 # ---------------------------------------------------------------------------

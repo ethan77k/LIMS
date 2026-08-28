@@ -15,6 +15,7 @@ from .routers import (
     export,
     notifications,
     orders,
+    qrcode,
     reports,
     review,
     samples,
@@ -33,6 +34,7 @@ app.include_router(auth.router)
 app.include_router(orders.router)
 app.include_router(review.router)
 app.include_router(samples.router)
+app.include_router(qrcode.router)
 app.include_router(schedule.router)
 app.include_router(experiment.router)
 app.include_router(reports.router)
