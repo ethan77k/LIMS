@@ -25,7 +25,7 @@ def batch_to_dict(b) -> dict:
     return {
         "id": b.id, "batch_no": b.batch_no, "entrust_org": b.entrust_org, "entruster": b.entruster,
         "sample_name": b.sample_name, "sample_model": b.sample_model,
-        "customer_model": b.customer_model, "quantity": b.quantity, "unit": b.unit,
+        "customer_model": b.customer_model, "sample_stage": b.sample_stage, "quantity": b.quantity, "unit": b.unit,
         "operator": b.operator, "remark": b.remark, "created_at": _dt(b.created_at),
         "samples": [sample_to_dict(s) for s in sorted(b.samples, key=lambda x: x.id)],
     }
@@ -45,12 +45,17 @@ def schedule_to_dict(s) -> dict:
     return {
         "id": s.id, "order_id": s.order_id, "sample_id": s.sample_id,
         "sample_no": s.sample.sample_no if s.sample else "",
+        "sn": s.sample.sn if s.sample else "",
+        "order_no": (s.order.experiment_no or s.order.order_no) if s.order else "",
+        "test_item": s.order.test_item if s.order else "",
+        "entrust_org": s.order.entrust_org if s.order else "",
         "equipment_id": s.equipment_id,
         "equipment_name": s.equipment.name if s.equipment else "",
         "experiment_hours": s.experiment_hours, "transition_hours": s.transition_hours,
         "total_hours": s.total_hours,
         "plan_start": _dt(s.plan_start), "plan_end": _dt(s.plan_end),
         "actual_start": _dt(s.actual_start), "actual_end": _dt(s.actual_end),
+        "result": s.result,
         "status": s.status,
     }
 

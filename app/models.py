@@ -130,12 +130,13 @@ class SampleBatch(Base):
     __tablename__ = "sample_batches"
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
-    batch_no: Mapped[str] = mapped_column(String(40), unique=True, index=True)   # 批次号 PC{YYMM}-四位
+    batch_no: Mapped[str] = mapped_column(String(40), unique=True, index=True)   # 批次号 PC{YYMM}-{DD}{两位流水}
     entrust_org: Mapped[str] = mapped_column(String(128), default="")            # 来源委托单位
     entruster: Mapped[str] = mapped_column(String(64), default="")               # 委托人
     sample_name: Mapped[str] = mapped_column(String(128), default="")            # 样品名称
     sample_model: Mapped[str] = mapped_column(String(128), default="")           # 样品型号
     customer_model: Mapped[str] = mapped_column(String(128), default="")         # 客户型号
+    sample_stage: Mapped[str] = mapped_column(String(32), default="")            # 样品阶段
     quantity: Mapped[int] = mapped_column(Integer, default=0)                    # 录入数量
     unit: Mapped[str] = mapped_column(String(16), default="台")
     operator: Mapped[str] = mapped_column(String(64), default="")                # 录入人
@@ -196,6 +197,7 @@ class Schedule(Base):
     actual_start: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     actual_end: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
+    result: Mapped[str] = mapped_column(String(8), default="")              # 该测试位结果 OK / NG
     status: Mapped[str] = mapped_column(String(16), default="已排期")  # 已排期 / 实验中 / 已完成
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
 

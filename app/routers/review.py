@@ -1,7 +1,8 @@
 """委托审核。
 
-通过：分配实验编号、生成样品列表、录入费用明细（可动态选择实验员）。
+通过：分配实验编号、录入费用明细（可动态选择实验员）。
 否决：记录否决原因。
+（样品不再随审核自动生成——实物样机来自样品池，排期时按需复用绑定。）
 """
 from datetime import datetime
 
@@ -12,9 +13,9 @@ from sqlalchemy.orm import Session
 from ..audit import log
 from ..database import get_db
 from ..deps import require_roles
-from ..models import CostItem, EntrustOrder, Equipment, Sample, SampleOperation, User
+from ..models import CostItem, EntrustOrder, Equipment, User
 from ..notify import notify_entruster
-from ..numbering import max_sample_seq, next_experiment_no
+from ..numbering import next_experiment_no
 from ..schemas import ReviewRequest
 from ..serializers import order_to_dict
 
@@ -64,14 +65,6 @@ def review_order(
     if data.required_start:
         order.required_start = data.required_start
 
-    # 生成样品：一次性取该实验编号下最大流水，循环内自增（避免逐样品查库 O(n²)）
-    seq = max_sample_seq(db, order.experiment_no)
-    for _ in range(order.sample_count):
-        seq += 1
-        sample_no = f"{order.experiment_no}-{seq:02d}"
-        sample = Sample(sample_no=sample_no, order_id=order.id, status="待接收", condition="未检查")
-        db.add(sample)
-
     # 费用明细
     total = 0.0
     for item in data.costs:
@@ -99,11 +92,6 @@ def review_order(
         db.add(cost)
         total += amount
     order.total_cost = round(total, 2)
-
-    # 记录样品操作（生成）
-    db.flush()
-    for sample in order.samples:
-        db.add(SampleOperation(sample_id=sample.id, action="生成", operator=reviewer.name, remark="审核通过自动生成"))
 
     log(db, reviewer, "审核通过", "order", order.id, f"{order.experiment_no} 实验编号已分配")
     notify_entruster(db, order, "委托审核通过", f"{order.order_no} 已通过审核，实验编号 {order.experiment_no}")

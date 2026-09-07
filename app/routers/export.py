@@ -6,11 +6,11 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy import or_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from ..database import get_db
 from ..deps import require_roles
-from ..models import EntrustOrder, Report, Sample, User
+from ..models import EntrustOrder, Report, Schedule, User
 
 router = APIRouter(prefix="/api/export", tags=["export"])
 
@@ -71,18 +71,25 @@ def export_samples(
     _: User = Depends(require_roles("admin", "experimenter")),
     status: str | None = Query(None),
 ):
-    q = db.query(Sample).join(EntrustOrder, Sample.order_id == EntrustOrder.id)
+    """导出实验排期/测试记录（每个测试位一行，含实物样机 SN 与复用关系）。"""
+    q = (
+        db.query(Schedule)
+        .options(selectinload(Schedule.sample), selectinload(Schedule.order), selectinload(Schedule.equipment))
+    )
     if status:
-        q = q.filter(Sample.status == status)
-    samples = q.order_by(Sample.id.desc()).all()
+        q = q.filter(Schedule.status == status)
+    schedules = q.order_by(Schedule.id.desc()).all()
     rows = [
-        [s.sample_no, s.order.experiment_no or s.order.order_no,
-         s.status, s.condition, s.result or "", s.remark,
-         s.created_at.strftime("%Y-%m-%d %H:%M") if s.created_at else ""]
-        for s in samples
+        [s.sample.sample_no if s.sample else "",
+         s.sample.sn or "" if s.sample else "",
+         (s.order.experiment_no or s.order.order_no) if s.order else "",
+         s.equipment.name if s.equipment else "",
+         s.result or "", s.status,
+         s.actual_start.strftime("%Y-%m-%d %H:%M") if s.actual_start else ""]
+        for s in schedules
     ]
     return _csv_response(
-        ["样品编号", "实验编号", "状态", "状况", "结果", "备注", "创建时间"],
+        ["样品编号", "SN", "实验编号", "设备", "结果", "状态", "开始时间"],
         rows, "samples",
     )
 

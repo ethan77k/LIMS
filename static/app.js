@@ -1033,19 +1033,20 @@ const SamplesView = {
     batches: [],
     // 样品池
     showBatchForm: false,
-    batchForm: { entrust_org: '', entruster: '', sample_name: '', sample_model: '', customer_model: '', unit: '台', sn_text: '', remark: '' },
+    batchForm: { entrust_org: '', entruster: '', sample_name: '', sample_model: '', customer_model: '', sample_stage: '', unit: '台', sn_text: '', remark: '' },
     expanded: {},
     batchQuery: { batch_no: '', sn: '', sample_model: '', date_from: '', date_to: '' },
     sampleDetail: null, showSampleDetail: false,
     showSampleEdit: false, editId: null, editForm: { sn: '', status: '', condition: '' },
     sampleStatuses: ['待接收', '已接收', '已排期', '实验中', '已完成', '已退还', '已报废', '已留存'],
+    sampleStages: ['EVT', 'DVT', 'DVT-2', 'DVT-3', 'PVT', 'PVT-2', 'PVT-3', 'MP', '二供', '三供', '四供', '五供'],
     showPrint: false, printBatch: null, printSampleId: null,
   }),
   methods: {
     async load() { this.loadBatches(); },
     async loadBatches() { this.batches = await api('/api/samples/batches'); },
     // ---- 样品池 ----
-    openBatchForm() { this.batchForm = { entrust_org: '', entruster: '', sample_name: '', sample_model: '', customer_model: '', unit: '台', sn_text: '', remark: '' }; this.showBatchForm = true; },
+    openBatchForm() { this.batchForm = { entrust_org: '', entruster: '', sample_name: '', sample_model: '', customer_model: '', sample_stage: '', unit: '台', sn_text: '', remark: '' }; this.showBatchForm = true; },
     async createBatch() {
       try {
         const sn_list = this.batchForm.sn_text.split(/[\n\r,，;；\s]+/).map(s => s.trim()).filter(Boolean);
@@ -1147,13 +1148,15 @@ const SamplesView = {
         <input type="date" v-model="batchQuery.date_to" title="录入日期至" style="width:150px">
         <button class="btn sm" @click="resetBatchQuery">重置</button>
       </div>
-      <table class="tbl"><thead><tr><th>批次号</th><th>来源单位</th><th>样品名称/型号</th><th>数量</th><th>录入人</th><th>录入时间</th><th>状态</th><th>操作</th></tr></thead>
+      <table class="tbl"><thead><tr><th>批次号</th><th>来源单位</th><th>样品名称</th><th>型号</th><th>样品阶段</th><th>数量</th><th>录入人</th><th>录入时间</th><th>状态</th><th>操作</th></tr></thead>
         <tbody>
           <template v-for="b in filteredBatches" :key="b.id">
             <tr @click="toggleBatch(b)" style="cursor:pointer">
               <td>{{b.batch_no}}</td>
               <td>{{b.entrust_org||'-'}}<div v-if="b.entruster" style="font-size:12px;color:var(--muted)">委托人：{{b.entruster}}</div></td>
-              <td>{{b.sample_name||'-'}} / {{b.sample_model||'-'}}</td>
+              <td>{{b.sample_name||'-'}}</td>
+              <td>{{b.sample_model||'-'}}</td>
+              <td>{{b.sample_stage||'-'}}</td>
               <td>{{b.quantity}}{{b.unit}}</td>
               <td>{{b.operator}}</td>
               <td>{{fmtDT(b.created_at)}}</td>
@@ -1161,7 +1164,7 @@ const SamplesView = {
               <td><button class="btn sm" @click.stop="toggleBatch(b)">{{expanded[b.id] ? '收起 ▲' : '展开 ▼'}}</button></td>
             </tr>
             <tr v-if="expanded[b.id]">
-              <td colspan="8" style="background:#f7f9fc;padding:12px">
+              <td colspan="10" style="background:#f7f9fc;padding:12px">
                 <div style="margin-bottom:8px">
                   <button class="btn success sm" @click="confirmBatch(b)">整批确认</button>
                   <button class="btn sm" @click="disposeBatch(b,'退还')">整批退还</button>
@@ -1192,7 +1195,7 @@ const SamplesView = {
               </td>
             </tr>
           </template>
-          <tr v-if="!filteredBatches.length"><td colspan="8" class="empty">{{ batches.length ? '没有符合查询条件的批次' : '暂无批次，点击上方「新建批次」录入' }}</td></tr>
+          <tr v-if="!filteredBatches.length"><td colspan="10" class="empty">{{ batches.length ? '没有符合查询条件的批次' : '暂无批次，点击上方「新建批次」录入' }}</td></tr>
         </tbody></table>
     </div>
   </div>
@@ -1211,6 +1214,7 @@ const SamplesView = {
       </div>
       <div class="form-row">
         <div class="form-group"><label>客户型号</label><input v-model="batchForm.customer_model"></div>
+        <div class="form-group"><label>样品阶段</label><input v-model="batchForm.sample_stage" list="sampleStageOptions" placeholder="如 EVT / DVT / PVT"><datalist id="sampleStageOptions"><option v-for="st in sampleStages" :key="st" :value="st"></option></datalist></div>
         <div class="form-group" style="flex:0 0 90px"><label>单位</label><input v-model="batchForm.unit"></div>
       </div>
       <div class="form-row">
@@ -1251,16 +1255,18 @@ const SamplesView = {
         SN {{sampleDetail.sn||'-'}} · 批次 {{sampleDetail.batch_no||'无'}} · 状态 <span v-html="badge(sampleDetail.status, {'待接收':'gray','已接收':'blue','已排期':'purple','实验中':'orange','已完成':'green','已退还':'gray','已报废':'red','已留存':'green'})"></span>
       </div>
 
-      <div v-if="sampleDetail.order" style="margin-bottom:16px">
-        <div style="font-weight:600;margin-bottom:6px">关联委托单</div>
-        <table class="tbl"><thead><tr><th>实验编号</th><th>委托单号</th><th>委托单位</th><th>检测项目</th><th>状态</th></tr></thead>
-          <tbody><tr>
-            <td>{{sampleDetail.order.experiment_no||'-'}}</td>
-            <td>{{sampleDetail.order.order_no||'-'}}</td>
-            <td>{{sampleDetail.order.entrust_org||'-'}}</td>
-            <td>{{sampleDetail.order.test_item||'-'}}</td>
-            <td v-html="badge(sampleDetail.order.status)"></td>
-          </tr></tbody></table>
+      <div style="margin-bottom:16px">
+        <div style="font-weight:600;margin-bottom:6px">关联委托单 / 测试位结果（由排期关联，支持样机复用）</div>
+        <table class="tbl"><thead><tr><th>实验编号/委托单</th><th>委托单位</th><th>检测项目</th><th>结果</th></tr></thead>
+          <tbody>
+            <tr v-for="sc in sampleDetail.schedules" :key="sc.id">
+              <td>{{sc.order_no||'-'}}</td>
+              <td>{{sc.entrust_org||'-'}}</td>
+              <td>{{sc.test_item||'-'}}</td>
+              <td>{{sc.result||'-'}}</td>
+            </tr>
+            <tr v-if="!sampleDetail.schedules.length"><td colspan="4" class="empty">暂无关联委托单</td></tr>
+          </tbody></table>
       </div>
 
       <div style="margin-bottom:16px">
@@ -1327,59 +1333,149 @@ const SamplesView = {
 
 /* ---------------- 实验排期 ---------------- */
 const ScheduleView = {
-  data: () => ({ orders: [], cur: null, detail: null, eq: [], poolSamples: [], showModal: false, form: { sample_id: null, equipment_id: null, experiment_hours: 4, transition_hours: 0, plan_start: '' } }),
+  data: () => ({ orders: [], cur: null, detail: null, eq: [], batches: [], curBatchId: null, showModal: false, form: { sample_ids: [], equipment_id: null, experiment_hours: 4, transition_hours: 0, plan_start: '' } }),
+  computed: {
+    needCount() { return this.detail ? (this.detail.sample_count || 0) : 0; },
+    scheduledCount() { return (this.detail && this.detail.schedules) ? this.detail.schedules.length : 0; },
+    full() { return this.scheduledCount >= this.needCount; },
+    curBatch() { return this.batches.find(b => b.id === this.curBatchId) || null; },
+  },
   methods: {
     async load() { this.orders = await api('/api/orders?status='); this.eq = await api('/api/equipment'); },
-    async open(o) { this.cur = o; this.detail = await api('/api/orders/' + o.id); this.poolSamples = await api('/api/samples?unbound=true&status=' + encodeURIComponent('已接收')); this.showModal = true; },
+    async open(o) {
+      this.cur = o;
+      this.detail = await api('/api/orders/' + o.id);
+      this.batches = (await api('/api/samples/batches'))
+        .map(b => {
+          b.ok = (b.samples || []).filter(s => this.canPick(s)).length;
+          return b;
+        })
+        .filter(b => b.ok > 0);
+      this.curBatchId = this.batches.length ? this.batches[0].id : null;
+      this.form = { sample_ids: [], equipment_id: null, experiment_hours: 4, transition_hours: 0, plan_start: '' };
+      this.showModal = true;
+    },
+    canPick(s) { return !s.order_id && ['已接收','已排期','实验中','已完成'].includes(s.status) && !this.scheduledFor(s); },
+    scheduledFor(s) { return !!(this.detail && this.detail.schedules && this.detail.schedules.some(sc => sc.sample_id === s.id)); },
+    curSamples() { return this.curBatch ? [...this.curBatch.samples].sort((a, b) => (this.canPick(a) === this.canPick(b)) ? 0 : (this.canPick(a) ? -1 : 1)) : []; },
     async addSchedule() {
       try {
-        if (!this.form.sample_id || !this.form.equipment_id) { toast('请选择样品和设备', 'error'); return; }
-        await api('/api/schedules', 'POST', { ...this.form, experiment_hours: Number(this.form.experiment_hours), transition_hours: Number(this.form.transition_hours), order_id: this.cur.id });
-        toast('排期成功', 'success'); this.open(this.cur);
+        if (!this.form.sample_ids.length) { toast('请选择样品', 'error'); return; }
+        if (!this.form.equipment_id) { toast('请选择设备', 'error'); return; }
+        if (!this.form.plan_start) { toast('预计开始时间必填', 'error'); return; }
+        const remain = this.needCount - this.scheduledCount;
+        if (this.form.sample_ids.length > remain) { toast('已选 ' + this.form.sample_ids.length + ' 台，但还可再排 ' + remain + ' 条', 'error'); return; }
+        for (const sid of this.form.sample_ids) {
+          await api('/api/schedules', 'POST', {
+            sample_id: sid,
+            order_id: this.cur.id,
+            equipment_id: this.form.equipment_id,
+            experiment_hours: Number(this.form.experiment_hours),
+            transition_hours: Number(this.form.transition_hours),
+            plan_start: this.form.plan_start || null,
+          });
+        }
+        toast('已生成 ' + this.form.sample_ids.length + ' 条排期计划', 'success'); this.open(this.cur);
       } catch (e) { toast(e.message, 'error'); }
     },
-    async del(s) { await api('/api/schedules/' + s.id, 'DELETE'); this.open(this.cur); },
+    async removeSchedule(s) {
+      if (!confirm('确定删除这条排期计划？')) return;
+      try { await api('/api/schedules/' + s.id, 'DELETE'); toast('已删除', 'success'); this.open(this.cur); }
+      catch (e) { toast(e.message, 'error'); }
+    },
     badge, fmtDT,
   },
   mounted() { this.load(); },
   template: `
   <div class="card">
     <h3>实验排期</h3>
-    <table class="tbl"><thead><tr><th>实验编号</th><th>委托单位</th><th>检测项目</th><th>状态</th><th>操作</th></tr></thead>
+    <table class="tbl"><thead><tr><th>实验编号</th><th>委托单位</th><th>检测项目</th><th>需求数量</th><th>状态</th><th>操作</th></tr></thead>
     <tbody>
       <template v-for="o in orders" :key="o.id">
         <tr v-if="['已审核','已排期','实验中'].includes(o.status)">
           <td>{{o.experiment_no||o.order_no}}</td><td>{{o.entrust_org}}</td><td>{{o.test_item}}</td>
+          <td>{{o.sample_count}} {{o.sample_unit}}</td>
           <td v-html="badge(o.status)"></td><td><button class="btn primary sm" @click="open(o)">排期</button></td>
         </tr>
       </template>
     </tbody></table>
   </div>
   <div class="modal-mask" v-if="showModal" @click.self="showModal=false">
-    <div class="modal" style="width:900px">
-      <h3>样品排期 —— {{cur.experiment_no||cur.order_no}}</h3>
-      <div class="form-row" style="background:#f7f9fc;padding:12px;border-radius:6px">
-        <div class="form-group"><label>样品</label><select v-model="form.sample_id">
-          <option :value="null">选择样品</option>
-          <optgroup label="本委托单样品"><option v-for="s in detail.samples" :value="s.id" :disabled="s.status!=='已接收'">{{s.sample_no}}（{{s.status}}）</option></optgroup>
-          <optgroup label="样品池样品"><option v-for="s in poolSamples" :value="s.id">{{s.sample_no}} · SN {{s.sn}}</option></optgroup>
-        </select></div>
-        <div class="form-group"><label>设备</label><select v-model="form.equipment_id">
-          <option :value="null">选择设备</option><option v-for="e in eq" :value="e.id" :disabled="e.status!=='可用'">{{e.name}}（{{e.exp_type}}）</option>
-        </select></div>
-        <div class="form-group" style="flex:0 0 90px"><label>实验用时(h)</label><input type="number" v-model.number="form.experiment_hours"></div>
-        <div class="form-group" style="flex:0 0 90px"><label>过渡用时(h)</label><input type="number" v-model.number="form.transition_hours"></div>
-        <div class="form-group" style="flex:0 0 200px"><label>预计开始时间</label><input type="datetime-local" v-model="form.plan_start"></div>
-        <div class="form-group" style="flex:0 0 auto;align-self:flex-end"><button class="btn primary" @click="addSchedule">添加排期</button></div>
+    <div class="modal" style="width:920px">
+      <h3>样品排期计划 —— {{cur.experiment_no||cur.order_no}}</h3>
+      <div style="color:var(--muted);font-size:13px;margin:4px 0 10px">
+        委托单位 {{detail.entrust_org||'-'}} · 检测项目 {{detail.test_item||'-'}} · 需求数量 <b>{{needCount}}</b> {{detail.sample_unit||''}} · 已排 <b>{{scheduledCount}}</b>/{{needCount}}
+        <span v-if="full" style="color:#0a7d32;font-weight:600">（已排满）</span>
+        <span v-else style="color:#b26a00">（还可再排 {{needCount - scheduledCount}} 条）</span>
       </div>
-      <table class="tbl" style="margin-top:14px"><thead><tr><th>样品编号</th><th>设备</th><th>实验用时</th><th>过渡用时</th><th>总用时</th><th>预计开始</th><th>预计结束</th><th>状态</th><th></th></tr></thead>
+
+      <div style="font-weight:600;margin:2px 0 6px">选择样品<span style="color:var(--muted);font-weight:400;margin-left:8px">可多选 · 可复用 · 已选 {{form.sample_ids.length}} 台</span></div>
+
+      <div style="color:var(--muted);font-size:12px;margin:2px 0 4px">① 选择样品批次</div>
+      <div style="max-height:140px;overflow:auto;border:1px solid var(--border);border-radius:4px">
+        <table class="tbl" style="margin:0">
+          <thead><tr>
+            <th style="position:sticky;top:0;width:34px"></th>
+            <th style="position:sticky;top:0">批次号</th>
+            <th style="position:sticky;top:0">来源单位</th>
+            <th style="position:sticky;top:0">样品名称</th>
+            <th style="position:sticky;top:0">型号</th>
+            <th style="position:sticky;top:0">样品阶段</th>
+            <th style="position:sticky;top:0">数量</th>
+            <th style="position:sticky;top:0">可排</th>
+          </tr></thead>
+          <tbody>
+            <tr v-for="b in batches" :key="b.id" @click="curBatchId=b.id" style="cursor:pointer" :style="curBatchId===b.id ? 'background:#eef4ff' : ''">
+              <td><input type="radio" :value="b.id" v-model="curBatchId" @click.stop></td>
+              <td>{{b.batch_no}}</td>
+              <td>{{b.entrust_org||'-'}}</td>
+              <td>{{b.sample_name||'-'}}</td>
+              <td>{{b.sample_model||'-'}}</td>
+              <td>{{b.sample_stage||'-'}}</td>
+              <td>{{b.quantity}}{{b.unit||''}}</td>
+              <td>{{b.ok}} 台</td>
+            </tr>
+            <tr v-if="!batches.length"><td colspan="8" class="empty">暂无可排期的样品批次（需已接收/已排期/实验中/已完成样机），请先到「样品管理」新建批次并确认</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div style="color:var(--muted);font-size:12px;margin:8px 0 4px">② 勾选样机<span v-if="curBatch">（{{curBatch.batch_no}}）</span><span style="margin-left:8px">灰色 = 已绑单 / 状态不可排 / 已排本单</span></div>
+      <div style="max-height:170px;overflow:auto;border:1px solid var(--border);border-radius:4px">
+        <table class="tbl" style="margin:0">
+          <thead><tr><th style="position:sticky;top:0;width:40px"></th><th style="position:sticky;top:0">SN</th><th style="position:sticky;top:0">样品编号</th><th style="position:sticky;top:0">状态</th></tr></thead>
+          <tbody>
+            <tr v-for="s in curSamples()" :key="s.id">
+              <td><input type="checkbox" :value="s.id" v-model="form.sample_ids" :disabled="!canPick(s)"></td>
+              <td>{{s.sn||'-'}}</td>
+              <td>{{s.sample_no}}</td>
+              <td><span v-html="badge(s.status, {'待接收':'gray','已接收':'blue','已排期':'purple','实验中':'orange','已完成':'green','已退还':'gray','已报废':'red','已留存':'green'})"></span><span v-if="scheduledFor(s)" style="color:var(--muted);font-size:12px;margin-left:6px;border:1px solid var(--border);border-radius:3px;padding:0 4px">已排本单</span></td>
+            </tr>
+            <tr v-if="!curBatch"><td colspan="4" class="empty">请先在上方选择一个样品批次</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="form-row" style="background:#f7f9fc;padding:12px;border-radius:6px;margin-top:12px">
+        <div class="form-group" style="flex:1 1 180px;margin-bottom:0"><label>设备</label><select v-model="form.equipment_id">
+          <option :value="null">选择设备</option>
+          <option v-for="e in eq" :value="e.id" :disabled="['停用','报废'].includes(e.status)">{{e.name}}（{{e.exp_type}}）</option>
+        </select></div>
+        <div class="form-group" style="flex:0 0 90px;margin-bottom:0"><label>实验用时(h)</label><input type="number" v-model.number="form.experiment_hours"></div>
+        <div class="form-group" style="flex:0 0 90px;margin-bottom:0"><label>过渡用时(h)</label><input type="number" v-model.number="form.transition_hours"></div>
+        <div class="form-group" style="flex:0 0 215px;margin-bottom:0"><label>预计开始时间 <span class="req">*</span></label><input type="datetime-local" v-model="form.plan_start"></div>
+        <div class="form-group" style="flex:0 0 auto;margin-bottom:0;align-self:flex-end"><button class="btn primary" :disabled="full" @click="addSchedule">生成排期计划</button></div>
+      </div>
+
+      <div style="font-weight:600;margin:14px 0 6px">已生成排期计划</div>
+      <table class="tbl"><thead><tr><th>SN</th><th>样品编号</th><th>设备</th><th>总用时</th><th>预计开始</th><th>结果</th><th>状态</th><th>操作</th></tr></thead>
       <tbody>
         <tr v-for="s in detail.schedules" :key="s.id">
-          <td>{{s.sample_no}}</td><td>{{s.equipment_name}}</td><td>{{s.experiment_hours}}</td><td>{{s.transition_hours}}</td>
-          <td>{{s.total_hours}}</td><td>{{fmtDT(s.plan_start)}}</td><td>{{fmtDT(s.plan_end)}}</td><td v-html="badge(s.status)"></td>
-          <td><button class="btn link" v-if="s.status==='已排期'" @click="del(s)">删除</button></td>
+          <td>{{s.sn||'-'}}</td><td>{{s.sample_no}}</td><td>{{s.equipment_name}}</td>
+          <td>{{s.total_hours}}</td><td>{{fmtDT(s.plan_start)}}</td><td>{{s.result||'-'}}</td><td v-html="badge(s.status)"></td>
+          <td><button class="btn link sm" v-if="s.status==='已排期'" @click="removeSchedule(s)">删除</button></td>
         </tr>
-        <tr v-if="!detail.schedules.length"><td colspan="9" class="empty">暂无排期</td></tr>
+        <tr v-if="!detail.schedules.length"><td colspan="8" class="empty">暂无排期计划，请在上方选择样品并填写排期信息后生成</td></tr>
       </tbody></table>
       <div class="modal-actions"><button class="btn" @click="showModal=false">关闭</button></div>
     </div>
@@ -1394,7 +1490,8 @@ const ExperimentView = {
     async open(o) { this.cur = o; this.detail = await api('/api/orders/' + o.id); this.showModal = true; },
     async start(s) { await api('/api/experiment/schedule/' + s.id + '/start', 'POST'); this.open(this.cur); toast('已开始', 'success'); },
     async end(s) { await api('/api/experiment/schedule/' + s.id + '/end', 'POST'); this.open(this.cur); toast('已结束', 'success'); },
-    async setResult(s, r) { await api('/api/experiment/result', 'PUT', { sample_id: s.id, result: r }); this.open(this.cur); },
+    async setResult(s, r) { await api('/api/experiment/result', 'PUT', { schedule_id: s.id, result: r }); this.open(this.cur); },
+    missingResults() { return (this.detail && this.detail.schedules || []).filter(s => !['OK', 'NG'].includes(s.result)).length; },
     async finish() {
       try { await api('/api/experiment/order/' + this.cur.id + '/finish', 'POST'); toast('实验已完成', 'success'); this.open(this.cur); this.load(); }
       catch (e) { toast(e.message, 'error'); }
@@ -1430,11 +1527,12 @@ const ExperimentView = {
           </td>
         </tr>
       </tbody></table>
-      <h4 style="margin:14px 0 6px">样品实验结果</h4>
-      <table class="tbl"><thead><tr><th>样品编号</th><th>状态</th><th>实验结果</th></tr></thead>
+      <h4 style="margin:14px 0 6px">测试位实验结果（每行一个测试位，样机可复用）</h4>
+      <table class="tbl"><thead><tr><th>SN</th><th>样品编号</th><th>设备</th><th>状态</th><th>实验结果</th></tr></thead>
       <tbody>
-        <tr v-for="s in detail.samples" :key="s.id">
-          <td>{{s.sample_no}}</td><td v-html="badge(s.status, {'待接收':'gray','已接收':'blue','已排期':'purple','实验中':'orange','已完成':'green','已退还':'gray','已报废':'red','已留存':'green'})"></td>
+        <tr v-for="s in detail.schedules" :key="s.id">
+          <td>{{s.sn||'-'}}</td><td>{{s.sample_no}}</td><td>{{s.equipment_name}}</td>
+          <td v-html="badge(s.status)"></td>
           <td>
             <div class="result-btns">
               <button class="btn ok" :class="{sel: s.result==='OK'}" @click="setResult(s,'OK')">OK</button>
@@ -1442,10 +1540,12 @@ const ExperimentView = {
             </div>
           </td>
         </tr>
+        <tr v-if="!detail.schedules.length"><td colspan="5" class="empty">暂无排期</td></tr>
       </tbody></table>
       <div class="modal-actions">
+        <span v-if="missingResults() > 0" style="color:#b7791f;font-size:12px;margin-right:auto">还有 {{missingResults()}} 条排期未填写实验结果（OK/NG），不能结束</span>
         <button class="btn" @click="showModal=false">关闭</button>
-        <button class="btn success" @click="finish" :disabled="detail.status==='已完成'">结束全部实验</button>
+        <button class="btn success" @click="finish" :disabled="detail.status==='已完成' || missingResults() > 0">结束全部实验</button>
       </div>
     </div>
   </div>`,
@@ -1462,16 +1562,28 @@ const ReportsView = {
     },
     switchTab(t) { this.tab = t; if (t === 'arch') this.loadArchive(); },
     async open(o) { this.cur = o; this.detail = await api('/api/orders/' + o.id); this.showModal = true; },
-    report(kind, version) {
-      let url = '/api/reports/' + kind + '/' + this.cur.id;
-      if (version) url += '?version=' + encodeURIComponent(version);
-      window.open(url, '_blank');
+    async report(kind, version) {
+      // 先同步打开空窗口（避免被浏览器拦截弹窗），再带 token 拉取 HTML 写入
+      const w = window.open('', '_blank');
+      if (!w) { toast('请允许浏览器弹出新窗口', 'error'); return; }
+      try {
+        const url = '/api/reports/' + kind + '/' + this.cur.id + (version ? '?version=' + encodeURIComponent(version) : '');
+        const html = await api(url);
+        w.document.write(html); w.document.close();
+      } catch (e) { w.close(); toast(e.message, 'error'); }
     },
     async issue(report_type, version) {
       try { await api('/api/reports/' + this.cur.id + '/issue', 'POST', { report_type, version: version || '' }); toast('已签发并留档', 'success'); }
       catch (e) { toast(e.message, 'error'); }
     },
-    viewArchive(r) { window.open('/api/reports/archive/' + r.id + '/view', '_blank'); },
+    async viewArchive(r) {
+      const w = window.open('', '_blank');
+      if (!w) { toast('请允许浏览器弹出新窗口', 'error'); return; }
+      try {
+        const html = await api('/api/reports/archive/' + r.id + '/view');
+        w.document.write(html); w.document.close();
+      } catch (e) { w.close(); toast(e.message, 'error'); }
+    },
     async delArchive(r) { if (confirm('确认作废报告 ' + r.report_no + '？')) { await api('/api/reports/archive/' + r.id, 'DELETE'); this.loadArchive(); } },
     badge,
   },
@@ -1513,14 +1625,15 @@ const ReportsView = {
         <h3>报告类型</h3>
         <p style="margin-bottom:16px;color:#6b7a90">实验编号：{{cur.experiment_no||cur.order_no}}　|　{{cur.test_item}}</p>
         <button class="btn primary" style="width:100%;margin-bottom:10px" @click="report('entrust')">实验委托记录单（表-TC05-01A）</button>
-        <button class="btn" style="width:100%;margin-bottom:10px" @click="report('test','常规')">检测报告（常规版）</button>
-        <button class="btn" style="width:100%" @click="report('test','检测')">检测报告（检测版）</button>
+        <p v-if="detail.status!=='已完成'" style="color:#b7791f;font-size:12px;margin:0 0 10px">实验未完成（当前 {{detail.status}}），检测报告需在「开始/结束实验」中结束全部实验并填写结果后生成</p>
+        <button class="btn" style="width:100%;margin-bottom:10px" :disabled="detail.status!=='已完成'" @click="report('test','常规')">检测报告（常规版）</button>
+        <button class="btn" style="width:100%" :disabled="detail.status!=='已完成'" @click="report('test','检测')">检测报告（检测版）</button>
         <div style="border-top:1px dashed #e2e8f0;margin:16px 0;padding-top:14px">
           <h4 style="margin-bottom:10px">签发并留档</h4>
           <div class="form-row">
             <button class="btn" style="flex:1" @click="issue('委托记录单','')">签发委托记录单</button>
-            <button class="btn" style="flex:1" @click="issue('检测报告','常规')">签发检测报告(常规)</button>
-            <button class="btn" style="flex:1" @click="issue('检测报告','检测')">签发检测报告(检测)</button>
+            <button class="btn" style="flex:1" :disabled="detail.status!=='已完成'" @click="issue('检测报告','常规')">签发检测报告(常规)</button>
+            <button class="btn" style="flex:1" :disabled="detail.status!=='已完成'" @click="issue('检测报告','检测')">签发检测报告(检测)</button>
           </div>
         </div>
         <div class="modal-actions"><button class="btn" @click="showModal=false">关闭</button></div>

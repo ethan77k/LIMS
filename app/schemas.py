@@ -170,6 +170,7 @@ class ScheduleOut(BaseModel):
     plan_end: datetime | None
     actual_start: datetime | None
     actual_end: datetime | None
+    result: str = ""
     status: str
 
 
@@ -264,6 +265,7 @@ class SampleBatchCreate(BaseModel):
     sample_name: str = ""
     sample_model: str = ""
     customer_model: str = ""
+    sample_stage: str = ""
     unit: str = "台"
     sn_list: list[str] = []    # 批量 SN 列表（逐条生成样品）
     remark: str = ""
@@ -278,6 +280,7 @@ class SampleBatchOut(BaseModel):
     sample_name: str
     sample_model: str
     customer_model: str
+    sample_stage: str
     quantity: int
     unit: str
     operator: str
@@ -303,13 +306,28 @@ class ScheduleCreate(BaseModel):
     order_id: int | None = None     # 池样品排期时指定目标委托单
 
 
+class SampleAssignment(BaseModel):
+    """一次排期里，某台实物样机承担的测试位数量（复用次数）。"""
+    sample_id: int
+    count: int = 1      # 复用次数：该样机承担几个测试位
+
+
+class OrderBatchScheduleRequest(BaseModel):
+    """整单批量排期：从样品池选已确认（已接收）实物样机，按复用次数覆盖委托单需求数量，
+    一次性生成排期（每个测试位一条）并自动开始实验。"""
+    equipment_id: int
+    assignments: list[SampleAssignment] = []
+    experiment_hours: float = 0.0
+    transition_hours: float = 0.0
+    plan_start: datetime | None = None
+
+
 # ---------------------------------------------------------------------------
 # 实验
 # ---------------------------------------------------------------------------
 class ResultUpdate(BaseModel):
-    sample_id: int
+    schedule_id: int
     result: str        # OK / NG
-    condition: str = ""
     remark: str = ""
 
 

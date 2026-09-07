@@ -47,7 +47,7 @@ def end_schedule(schedule_id: int, db: Session = Depends(get_db), user: User = D
     schedule.actual_end = datetime.now()
     db.add(SampleOperation(sample_id=schedule.sample_id, action="结束实验", operator=user.name))
     db.flush()  # autoflush=False，需显式 flush 让后续 count 反映本次状态变更
-    # 该样品所有排期均已完成时，样品状态退出「实验中」
+    # 该样机所有排期均已完成时，回到「已接收」（可复用，供下一委托单排期）
     sample = db.get(Sample, schedule.sample_id)
     if sample is not None and sample.status == "实验中":
         remaining = (
@@ -56,8 +56,9 @@ def end_schedule(schedule_id: int, db: Session = Depends(get_db), user: User = D
             .count()
         )
         if remaining == 0:
-            sample.status = "已完成"
-            db.add(SampleOperation(sample_id=sample.id, action="实验完成", operator=user.name))
+            sample.status = "已接收"
+            db.add(SampleOperation(sample_id=sample.id, action="实验完成", operator=user.name,
+                                   remark="样机可复用，回到已接收"))
     log(db, user, "结束实验", "schedule", schedule.id, schedule.sample.sample_no if schedule.sample else "")
     db.commit()
     return schedule_to_dict(schedule)
@@ -65,18 +66,23 @@ def end_schedule(schedule_id: int, db: Session = Depends(get_db), user: User = D
 
 @router.put("/result")
 def update_result(data: ResultUpdate, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "experimenter"))):
-    sample = db.get(Sample, data.sample_id)
-    if sample is None:
-        raise HTTPException(404, "样品不存在")
+    schedule = db.get(Schedule, data.schedule_id)
+    if schedule is None:
+        raise HTTPException(404, "排期计划不存在")
     if data.result not in ("OK", "NG"):
         raise HTTPException(400, "实验结果必须为 OK 或 NG")
-    sample.result = data.result
-    if data.condition:
-        sample.condition = data.condition
+    order = db.get(EntrustOrder, schedule.order_id)
+    if order is not None and order.status == "已完成":
+        raise HTTPException(400, "该委托单实验已结束，不可再修改实验结果")
+    schedule.result = data.result
     if data.remark:
-        sample.remark = data.remark
-    db.add(SampleOperation(sample_id=sample.id, action="填写结果", operator=user.name, remark=f"结果 {data.result}"))
-    log(db, user, "填写结果", "sample", sample.id, f"{sample.sample_no} = {data.result}")
+        db.add(SampleOperation(sample_id=schedule.sample_id, action="填写结果", operator=user.name,
+                               remark=f"结果 {data.result}：{data.remark}"))
+    else:
+        db.add(SampleOperation(sample_id=schedule.sample_id, action="填写结果", operator=user.name,
+                               remark=f"结果 {data.result}"))
+    log(db, user, "填写结果", "schedule", schedule.id,
+        f"{schedule.sample.sample_no if schedule.sample else ''} = {data.result}")
     db.commit()
     return {"message": "结果已保存"}
 
@@ -94,12 +100,12 @@ def finish_order(order_id: int, db: Session = Depends(get_db), user: User = Depe
     unfinished = [s for s in order.schedules if s.status != "已完成"]
     if unfinished:
         raise HTTPException(400, f"还有 {len(unfinished)} 条排期未结束，不能结束实验")
+    # 所有排期必须已填写实验结果（OK/NG），防止未判定就结束导致报告结论失真
+    no_result = [s for s in order.schedules if s.result not in ("OK", "NG")]
+    if no_result:
+        raise HTTPException(400, f"还有 {len(no_result)} 条排期未填写实验结果（OK/NG），不能结束实验")
     order.status = "已完成"
     order.finish_at = datetime.now()
-    for sample in order.samples:
-        if sample.status not in ("已退还", "已报废", "已留存"):
-            sample.status = "已完成"
-        db.add(SampleOperation(sample_id=sample.id, action="实验完成", operator=user.name))
     log(db, user, "实验完成", "order", order.id, f"{order.experiment_no or order.order_no}")
     notify_entruster(db, order, "实验已完成", f"{order.experiment_no or order.order_no} {order.sample_name} 已完成，可查看报告")
     db.commit()

@@ -26,6 +26,9 @@ def init_db():
         _migrate_entruster_user_id(db)
         _migrate_cost_fields(db)
         _migrate_sample_batches_entruster(db)
+        _migrate_sample_batches_sample_stage(db)
+        _migrate_schedules_result(db)
+        _migrate_sample_no_3digit(db)
         db.commit()
     finally:
         db.close()
@@ -152,6 +155,29 @@ def _migrate_sample_batches_entruster(db):
     cols = [row[1] for row in db.execute(text("PRAGMA table_info(sample_batches)"))]
     if "entruster" not in cols:
         db.execute(text("ALTER TABLE sample_batches ADD COLUMN entruster VARCHAR(64) DEFAULT ''"))
+
+
+def _migrate_sample_batches_sample_stage(db):
+    """为 sample_batches 增加 sample_stage（样品阶段）列（幂等）。"""
+    cols = [row[1] for row in db.execute(text("PRAGMA table_info(sample_batches)"))]
+    if "sample_stage" not in cols:
+        db.execute(text("ALTER TABLE sample_batches ADD COLUMN sample_stage VARCHAR(32) DEFAULT ''"))
+
+
+def _migrate_schedules_result(db):
+    """为 schedules 增加 result（测试位结果 OK/NG）列（幂等）。"""
+    cols = [row[1] for row in db.execute(text("PRAGMA table_info(schedules)"))]
+    if "result" not in cols:
+        db.execute(text("ALTER TABLE schedules ADD COLUMN result VARCHAR(8) DEFAULT ''"))
+
+
+def _migrate_sample_no_3digit(db):
+    """样品编号尾号由两位扩展为三位（-01 → -001），幂等。"""
+    db.execute(text(
+        "UPDATE samples SET sample_no = substr(sample_no, 1, length(sample_no) - 2) || '0' || substr(sample_no, -2) "
+        "WHERE substr(sample_no, -3, 1) = '-' AND substr(sample_no, -2) GLOB '[0-9][0-9]'"
+    ))
+    db.commit()
 
 
 def _seed_users(db):

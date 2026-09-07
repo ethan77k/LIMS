@@ -92,24 +92,25 @@ def next_report_no(db: Session) -> str:
 
 
 def next_batch_no(db: Session) -> str:
-    """样品批次号：PC{YYMM}-四位流水，如 PC2608-0001。"""
-    prefix = "PC" + datetime.now().strftime("%y%m")
+    """样品批次号：PC{YYMM}-{DD}{两位流水}，如 PC2609-0701（按天从 01 重新计数）。"""
+    now = datetime.now()
+    prefix = "PC" + now.strftime("%y%m") + "-" + now.strftime("%d")
     row = (
         db.query(func.max(SampleBatch.batch_no))
-        .filter(SampleBatch.batch_no.like(f"{prefix}-%"))
+        .filter(SampleBatch.batch_no.like(f"{prefix}%"))
         .scalar()
     )
     current = 0
     if row:
         try:
-            current = int(row.rsplit("-", 1)[1])
+            current = int(row[len(prefix):])
         except (ValueError, IndexError):
             current = 0
-    return f"{prefix}-{current + 1:04d}"
+    return f"{prefix}{current + 1:02d}"
 
 
 def next_pool_sample_no(db: Session, batch_no: str) -> str:
-    """池样品编号 = 批次号 + '-' + 两位流水，如 PC2608-0001-01。"""
+    """池样品编号 = 批次号 + '-' + 三位流水，如 PC2608-0001-001。"""
     row = (
         db.query(func.max(Sample.sample_no))
         .filter(Sample.sample_no.like(f"{batch_no}-%"))
@@ -121,4 +122,4 @@ def next_pool_sample_no(db: Session, batch_no: str) -> str:
             current = int(row.rsplit("-", 1)[1])
         except (ValueError, IndexError):
             current = 0
-    return f"{batch_no}-{current + 1:02d}"
+    return f"{batch_no}-{current + 1:03d}"

@@ -10,7 +10,7 @@ from ..audit import log
 from ..config import COMPANY_NAME, COMPANY_NAME_EN, LOGO_PATH
 from ..database import get_db
 from ..deps import require_roles
-from ..models import EntrustOrder, Report, User
+from ..models import EntrustOrder, Report, Schedule, User
 from ..notify import notify_entruster
 from ..numbering import next_report_no, retry_on_number_conflict
 from ..schemas import ReportIssueRequest
@@ -73,7 +73,15 @@ def _dt_full(v):
 
 
 def render_entrust_html(o: EntrustOrder) -> str:
-    sample_nos = ";".join(s.sample_no for s in o.samples)
+    # 样品编号取排期涉及的实物样机编号（去重，保持排期顺序）
+    _seen: set[str] = set()
+    _nos: list[str] = []
+    for s in o.schedules:
+        no = s.sample.sample_no if s.sample else ""
+        if no and no not in _seen:
+            _seen.add(no)
+            _nos.append(no)
+    sample_nos = ";".join(_nos)
     return f"""<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8">
 <title>试验委托记录单 {o.order_no}</title><style>{_BASE_CSS}</style></head><body>
 <div class="report">
@@ -101,30 +109,35 @@ def render_entrust_html(o: EntrustOrder) -> str:
 
 
 def render_test_html(o: EntrustOrder, version: str = "常规") -> str:
-    samples = list(o.samples)
-    ok_count = sum(1 for s in samples if s.result == "OK")
-    ng_count = sum(1 for s in samples if s.result == "NG")
-    passed = "合格" if samples and ng_count == 0 and ok_count == len(samples) else "不合格"
+    schedules = list(o.schedules)
+
+    def _res(s):
+        # 新流程结果存于排期；历史数据结果存于样品，这里兜底兼容
+        return s.result or (s.sample.result if s.sample else "")
+
+    ok_count = sum(1 for s in schedules if _res(s) == "OK")
+    ng_count = sum(1 for s in schedules if _res(s) == "NG")
+    passed = "合格" if schedules and ng_count == 0 and ok_count == len(schedules) else "不合格"
     passed_en = "Passed" if passed == "合格" else "Failed"
 
     if version == "常规":
         # 缩减版：只汇总结论，不逐样品、不含样品编号/试验条件/图片
         result_rows = (
             '<tr><td class="lbl">检验结果<br>Test Result</td>'
-            f'<td colspan="9">样品总数 {len(samples)}，合格 {ok_count}，不合格 {ng_count}'
-            f'　（未判定 {len(samples) - ok_count - ng_count}）</td></tr>'
+            f'<td colspan="9">样品总数 {len(schedules)}，合格 {ok_count}，不合格 {ng_count}'
+            f'　（未判定 {len(schedules) - ok_count - ng_count}）</td></tr>'
         )
         extra = ""
     else:
-        # 检测版：逐样品编号 + 结果，附样品编号、试验条件与实物图占位
+        # 检测版：逐测试位编号 + 结果，附样品编号、试验条件与实物图占位
         header_cells = ''.join(
-            f'<td style="text-align:center;font-weight:600">{i+1}#</td>' for i in range(len(samples))
+            f'<td style="text-align:center;font-weight:600">{i+1}#</td>' for i in range(len(schedules))
         ) or '<td></td>'
         result_cells = ''
-        for s in samples:
-            cls = "result-ok" if s.result == "OK" else ("result-ng" if s.result == "NG" else "")
-            result_cells += f'<td class="{cls}">{s.result or "-"}</td>'
-        sample_nos = "；".join(s.sample_no for s in samples)
+        for s in schedules:
+            cls = "result-ok" if _res(s) == "OK" else ("result-ng" if _res(s) == "NG" else "")
+            result_cells += f'<td class="{cls}">{_res(s) or "-"}</td>'
+        sample_nos = "；".join((s.sample.sample_no if s.sample else "") for s in schedules)
         result_rows = (
             '<tr><td class="lbl" rowspan="2">检验结果<br>Test Result</td>' + header_cells + '</tr>'
             '<tr>' + (result_cells or '<td></td>') + '</tr>'
@@ -161,7 +174,7 @@ def render_test_html(o: EntrustOrder, version: str = "常规") -> str:
 
 @router.get("/entrust/{order_id}", response_class=Response)
 def entrust_report(order_id: int, db: Session = Depends(get_db), _: User = Depends(require_roles("admin", "experimenter"))):
-    o = db.get(EntrustOrder, order_id, options=[selectinload(EntrustOrder.samples), selectinload(EntrustOrder.reviewer)])
+    o = db.get(EntrustOrder, order_id, options=[selectinload(EntrustOrder.schedules).selectinload(Schedule.sample), selectinload(EntrustOrder.reviewer)])
     if o is None:
         raise HTTPException(404, "委托单不存在")
     return Response(render_entrust_html(o), media_type="text/html")
@@ -174,9 +187,11 @@ def test_report(
     db: Session = Depends(get_db),
     _: User = Depends(require_roles("admin", "experimenter")),
 ):
-    o = db.get(EntrustOrder, order_id, options=[selectinload(EntrustOrder.samples), selectinload(EntrustOrder.reviewer)])
+    o = db.get(EntrustOrder, order_id, options=[selectinload(EntrustOrder.schedules).selectinload(Schedule.sample), selectinload(EntrustOrder.reviewer)])
     if o is None:
         raise HTTPException(404, "委托单不存在")
+    if o.status != "已完成":
+        raise HTTPException(400, "实验未完成，暂不能生成检测报告")
     return Response(render_test_html(o, version), media_type="text/html")
 
 
@@ -193,6 +208,8 @@ def issue_report(
     o = db.get(EntrustOrder, order_id)
     if o is None:
         raise HTTPException(404, "委托单不存在")
+    if data.report_type == "检测报告" and o.status != "已完成":
+        raise HTTPException(400, "实验未完成，暂不能签发检测报告")
     version = "" if data.report_type == "委托记录单" else data.version
     existing = (
         db.query(Report)
@@ -262,7 +279,7 @@ def archive_view(report_id: int, db: Session = Depends(get_db), _: User = Depend
     r = db.get(Report, report_id)
     if r is None:
         raise HTTPException(404, "报告不存在")
-    o = db.get(EntrustOrder, r.order_id, options=[selectinload(EntrustOrder.samples), selectinload(EntrustOrder.reviewer)])
+    o = db.get(EntrustOrder, r.order_id, options=[selectinload(EntrustOrder.schedules).selectinload(Schedule.sample), selectinload(EntrustOrder.reviewer)])
     if o is None:
         raise HTTPException(404, "委托单不存在")
     html = render_entrust_html(o) if r.report_type == "委托记录单" else render_test_html(o, r.version or "常规")

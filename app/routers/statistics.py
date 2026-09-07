@@ -123,9 +123,9 @@ def workload(db: Session = Depends(get_db), _: User = Depends(require_roles("adm
 
 @router.get("/result-distribution")
 def result_distribution(db: Session = Depends(get_db), _: User = Depends(require_roles("admin", "experimenter"))):
-    ok = db.query(Sample).filter(Sample.result == "OK").count()
-    ng = db.query(Sample).filter(Sample.result == "NG").count()
-    other = db.query(Sample).count() - ok - ng
+    ok = db.query(Schedule).filter(Schedule.result == "OK").count()
+    ng = db.query(Schedule).filter(Schedule.result == "NG").count()
+    other = db.query(Schedule).count() - ok - ng
     return [{"name": "OK", "value": ok}, {"name": "NG", "value": ng}, {"name": "未判定", "value": other}]
 
 
@@ -186,9 +186,9 @@ def detail(
 
     if type == "result":
         if key in ("OK", "NG"):
-            rows = db.query(Sample).filter(Sample.result == key).order_by(Sample.id.desc()).all()
+            rows = db.query(Schedule).filter(Schedule.result == key).order_by(Schedule.id.desc()).all()
         else:  # 未判定
-            rows = db.query(Sample).filter(~Sample.result.in_(["OK", "NG"])).order_by(Sample.id.desc()).all()
-        return [sample_to_dict(s) for s in rows]
+            rows = db.query(Schedule).filter(~Schedule.result.in_(["OK", "NG"])).order_by(Schedule.id.desc()).all()
+        return [schedule_to_dict(s) for s in rows]
 
     return []

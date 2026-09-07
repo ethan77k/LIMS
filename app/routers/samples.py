@@ -105,7 +105,7 @@ def create_batch(
     batch = SampleBatch(
         batch_no=batch_no, entrust_org=data.entrust_org, entruster=data.entruster,
         sample_name=data.sample_name, sample_model=data.sample_model,
-        customer_model=data.customer_model, quantity=len(sns), unit=data.unit,
+        customer_model=data.customer_model, sample_stage=data.sample_stage, quantity=len(sns), unit=data.unit,
         operator=user.name, remark=data.remark,
     )
     db.add(batch)
@@ -113,7 +113,7 @@ def create_batch(
 
     for i, sn in enumerate(sns, start=1):
         sample = Sample(
-            sample_no=f"{batch_no}-{i:02d}", order_id=None, status="待接收",
+            sample_no=f"{batch_no}-{i:03d}", order_id=None, status="待接收",
             condition="未检查", sn=sn, batch_id=batch.id,
         )
         db.add(sample)
