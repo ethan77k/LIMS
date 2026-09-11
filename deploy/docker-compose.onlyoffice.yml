@@ -1,0 +1,43 @@
+# OnlyOffice Document Server（社区版）—— 仅部署「文档服务器」容器。
+# LIMS 本体仍在 Windows 服务器上跑（原生 Python / uvicorn），此处只解决
+# 浏览器内嵌 Word/Excel 编辑器的渲染与协作服务。
+#
+# 前置条件：Windows 已装 Docker Desktop 并启用 WSL2。
+#
+# 启动：
+#   docker compose -f deploy/docker-compose.onlyoffice.yml up -d
+# 停止/卸载（含数据）：
+#   docker compose -f deploy/docker-compose.onlyoffice.yml down
+#   docker compose -f deploy/docker-compose.onlyoffice.yml down -v
+#
+# 注意：JWT_SECRET 必须与 LIMS 的环境变量 LIMS_ONLYOFFICE_JWT_SECRET 完全一致。
+services:
+  onlyoffice-document-server:
+    image: onlyoffice/documentserver:latest
+    container_name: onlyoffice-document-server
+    restart: unless-stopped
+    ports:
+      - "8088:80"                # 浏览器通过 http://<服务器IP>:8088 访问编辑器
+    environment:
+      # —— JWT 互信（LIMS 后端用同一密钥签发/校验 token）——
+      JWT_ENABLED: "true"
+      JWT_SECRET: "CHANGE_ME_随机长密钥_与LIMS一致"
+      JWT_HEADER: "Authorization"
+      JWT_IN_BODY: "true"
+      # —— 资源与并发（按服务器配置可选调整）——
+      # WOPI_ENABLED: "false"
+    volumes:
+      - onlyoffice_data:/var/www/onlyoffice/Data
+      - onlyoffice_lib:/var/lib/onlyoffice
+      - onlyoffice_db:/var/lib/postgresql
+      - onlyoffice_cache:/var/lib/onlyoffice/documentserver/App_Data/cache
+      - onlyoffice_log:/var/log/onlyoffice
+    tmpfs:
+      - /tmp
+
+volumes:
+  onlyoffice_data:
+  onlyoffice_lib:
+  onlyoffice_db:
+  onlyoffice_cache:
+  onlyoffice_log:

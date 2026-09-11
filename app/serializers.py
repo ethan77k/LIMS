@@ -51,12 +51,26 @@ def schedule_to_dict(s) -> dict:
         "entrust_org": s.order.entrust_org if s.order else "",
         "equipment_id": s.equipment_id,
         "equipment_name": s.equipment.name if s.equipment else "",
+        "experimenter_id": s.experimenter_id,
+        "experimenter_name": s.experimenter.name if s.experimenter else "",
         "experiment_hours": s.experiment_hours, "transition_hours": s.transition_hours,
         "total_hours": s.total_hours,
         "plan_start": _dt(s.plan_start), "plan_end": _dt(s.plan_end),
         "actual_start": _dt(s.actual_start), "actual_end": _dt(s.actual_end),
         "result": s.result,
         "status": s.status,
+    }
+
+
+def inspection_to_dict(x) -> dict:
+    return {
+        "id": x.id, "order_id": x.order_id,
+        "order_no": (x.order.experiment_no or x.order.order_no) if x.order else "",
+        "operator": x.operator,
+        "inspect_at": _dt(x.inspect_at),
+        "sample_condition": x.sample_condition,
+        "equipment_condition": x.equipment_condition,
+        "action": x.action, "action_detail": x.action_detail, "remark": x.remark,
     }
 
 
@@ -141,6 +155,7 @@ def report_to_dict(r) -> dict:
     return {
         "id": r.id, "order_id": r.order_id, "report_no": r.report_no,
         "report_type": r.report_type, "version": r.version, "status": r.status,
+        "has_docx": bool(r.docx_content),
         "issuer_id": r.issuer_id, "issuer_name": r.issuer.name if r.issuer else "",
         "issued_at": _dt(r.issued_at), "created_at": _dt(r.created_at),
         "order_no": r.order.order_no if r.order else "",

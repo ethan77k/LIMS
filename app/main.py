@@ -13,7 +13,9 @@ from .routers import (
     equipment,
     experiment,
     export,
+    inspections,
     notifications,
+    onlyoffice_router,
     orders,
     qrcode,
     reports,
@@ -21,6 +23,7 @@ from .routers import (
     samples,
     schedule,
     statistics,
+    templates,
 )
 from .seed import init_db
 
@@ -37,7 +40,9 @@ app.include_router(samples.router)
 app.include_router(qrcode.router)
 app.include_router(schedule.router)
 app.include_router(experiment.router)
+app.include_router(inspections.router)
 app.include_router(reports.router)
+app.include_router(onlyoffice_router.router)
 app.include_router(equipment.router)
 app.include_router(dashboard.router)
 app.include_router(statistics.router)
@@ -46,11 +51,22 @@ app.include_router(notifications.router)
 app.include_router(customers.router)
 app.include_router(cases.router)
 app.include_router(export.router)
+app.include_router(templates.router)
 
 
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
+
+
+# 前端静态资源禁用缓存：SPA 手工更新频繁，浏览器缓存旧 index.html/app.js 会导致看不到更新
+@app.middleware("http")
+async def no_cache_frontend(request, call_next):
+    response = await call_next(request)
+    path = request.url.path
+    if not path.startswith("/api/") and not path.startswith("/uploads/"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
 
 
 # 托管前端静态文件（放在最后，避免拦截 /api）

@@ -304,6 +304,27 @@ class ScheduleCreate(BaseModel):
     transition_hours: float = 0.0
     plan_start: datetime | None = None
     order_id: int | None = None     # 池样品排期时指定目标委托单
+    experimenter_id: int | None = None  # 实验员；不传则默认取委托单审核时指定的实验员
+
+
+class ScheduleStart(BaseModel):
+    """开始实验时可确认/修改：实验员、设备、预算实验时长。"""
+    experimenter_id: int | None = None
+    equipment_id: int | None = None
+    experiment_hours: float | None = None   # 预算实验时长（小时）
+
+
+class InspectionCreate(BaseModel):
+    """实验跟踪巡检记录。"""
+    order_id: int
+    inspect_at: datetime | None = None          # 巡检时间，不传默认当前时间
+    sample_condition: str = "正常"              # 样品状况 正常/异常
+    equipment_condition: str = "正常"           # 设备状况 正常/异常
+    action: str = "无"                          # 无/更换样品/更换设备/报修
+    schedule_id: int | None = None              # 更换样品/设备时：目标排期（测试位）
+    replacement_sample_id: int | None = None    # 更换样品时：替换样机
+    replacement_equipment_id: int | None = None # 更换设备时：替换设备
+    remark: str = ""
 
 
 class SampleAssignment(BaseModel):
@@ -462,6 +483,13 @@ class CustomerUpdate(BaseModel):
 class ReportIssueRequest(BaseModel):
     report_type: str = "检测报告"      # 委托记录单 / 检测报告
     version: str = "常规"              # 常规 / 检测（检测报告用）
+
+
+class ReportDraftRequest(BaseModel):
+    order_id: int
+    report_type: str = "检测报告"      # 委托记录单 / 检测报告
+    version: str = ""                  # 常规 / 检测（检测报告用；委托记录单为空）
+    content: str = ""                  # 编辑后的报告正文 HTML
 
 
 # ---------------------------------------------------------------------------

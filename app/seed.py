@@ -29,6 +29,9 @@ def init_db():
         _migrate_sample_batches_sample_stage(db)
         _migrate_schedules_result(db)
         _migrate_sample_no_3digit(db)
+        _migrate_schedules_experimenter(db)
+        _migrate_report_content(db)
+        _migrate_report_docx(db)
         db.commit()
     finally:
         db.close()
@@ -178,6 +181,33 @@ def _migrate_sample_no_3digit(db):
         "WHERE substr(sample_no, -3, 1) = '-' AND substr(sample_no, -2) GLOB '[0-9][0-9]'"
     ))
     db.commit()
+
+
+def _migrate_schedules_experimenter(db):
+    """为 schedules 增加 experimenter_id（实验员）列，并把存量排期回填为委托单审核时指定的实验员（幂等）。"""
+    cols = [row[1] for row in db.execute(text("PRAGMA table_info(schedules)"))]
+    if "experimenter_id" not in cols:
+        db.execute(text("ALTER TABLE schedules ADD COLUMN experimenter_id INTEGER"))
+        db.execute(text(
+            "UPDATE schedules SET experimenter_id = "
+            "(SELECT reviewer_id FROM entrust_orders WHERE entrust_orders.id = schedules.order_id)"
+        ))
+        db.commit()
+
+
+def _migrate_report_content(db):
+    """为 reports 增加 content（正文快照）列（幂等）。"""
+    cols = [row[1] for row in db.execute(text("PRAGMA table_info(reports)"))]
+    if "content" not in cols:
+        db.execute(text("ALTER TABLE reports ADD COLUMN content TEXT DEFAULT ''"))
+
+
+def _migrate_report_docx(db):
+    """为 reports / report_drafts 增加 docx_content（.docx 正文快照，OnlyOffice 编辑后以它为准）。幂等。"""
+    for table in ("reports", "report_drafts"):
+        cols = [row[1] for row in db.execute(text(f"PRAGMA table_info({table})"))]
+        if "docx_content" not in cols:
+            db.execute(text(f"ALTER TABLE {table} ADD COLUMN docx_content BLOB"))
 
 
 def _seed_users(db):

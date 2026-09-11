@@ -161,3 +161,12 @@ a.link { color: var(--info); cursor: pointer; text-decoration: underline; }
 .img-thumbs img { width: 72px; height: 72px; object-fit: cover; border: 1px solid var(--border);
   border-radius: 4px; cursor: pointer; background: #f5f7fa; }
 .img-thumbs img:hover { border-color: var(--primary); }
+
+/* ---------- 报告编辑 ---------- */
+.report-edit-modal { width: 900px; }
+.report-edit-frame { width: 100%; height: 68vh; border: 1px solid var(--border); border-radius: 6px; background: #fff; }
+
+/* ---------- OnlyOffice 在线编辑 ---------- */
+.oo-modal { width: 96vw; max-width: 1280px; }
+.oo-editor-host { width: 100%; height: 78vh; background: #fff; border-radius: 6px; overflow: hidden; }
+.oo-editor-host iframe { width: 100%; height: 100%; border: 0; }

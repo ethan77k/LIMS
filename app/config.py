@@ -41,3 +41,17 @@ def _lan_ip() -> str:
 # 二维码扫码后跳转的公开基址：手机需与服务器同网段，默认自动探测局域网 IP。
 # 可通过环境变量 LIMS_PUBLIC_URL 覆盖（如 "http://192.168.1.10:8000"）。
 PUBLIC_BASE_URL = os.getenv("LIMS_PUBLIC_URL", "").rstrip("/") or f"http://{_lan_ip()}:8000"
+
+
+# ---------------------------------------------------------------------------
+# OnlyOffice 在线编辑（可选集成）：未配置 ONLYOFFICE_URL 时自动禁用，
+# 报告编辑回退到「本机 Word COM / 浏览器 HTML 编辑」，不影响现有功能。
+# ---------------------------------------------------------------------------
+# OnlyOffice Document Server 对外地址（浏览器访问用），如 "http://192.168.1.10:8088"
+ONLYOFFICE_URL = os.getenv("LIMS_ONLYOFFICE_URL", "").rstrip("/")
+# 与 OnlyOffice 容器一致的 JWT 密钥（容器 -e JWT_SECRET 的值）；未配置则视为未启用
+ONLYOFFICE_JWT_SECRET = os.getenv("LIMS_ONLYOFFICE_JWT_SECRET", "")
+# OnlyOffice 工作文件目录：落盘会被 TSD 加密，必须放在明文区 D:/temp 下
+ONLYOFFICE_WORK_DIR = Path(os.getenv("LIMS_ONLYOFFICE_WORK_DIR", "D:/temp/lims_oo"))
+# LIMS 对外基址：OnlyOffice 容器（服务器端）用它回调/下载文档，须为其可访问的地址（默认局域网 IP）
+ONLYOFFICE_CALLBACK_BASE = os.getenv("LIMS_ONLYOFFICE_CALLBACK_BASE", "").rstrip("/") or PUBLIC_BASE_URL

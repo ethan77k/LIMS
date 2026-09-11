@@ -4,7 +4,7 @@
 """
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, LargeBinary, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .database import Base
@@ -187,6 +187,8 @@ class Schedule(Base):
     sample: Mapped["Sample"] = relationship("Sample")
     equipment_id: Mapped[int] = mapped_column(ForeignKey("equipments.id"), index=True)
     equipment: Mapped["Equipment"] = relationship("Equipment")
+    experimenter_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)  # 实验员（默认审核时指定）
+    experimenter: Mapped["User | None"] = relationship("User", foreign_keys=[experimenter_id])
 
     experiment_hours: Mapped[float] = mapped_column(Float, default=0.0)   # 实验用时（小时）
     transition_hours: Mapped[float] = mapped_column(Float, default=0.0)   # 过渡用时（小时）
@@ -255,6 +257,24 @@ class ShiftHandover(Base):
     order_no: Mapped[str] = mapped_column(String(32), default="")      # 冗余，便于查询
     note: Mapped[str] = mapped_column(Text, default="")
     operator: Mapped[str] = mapped_column(String(64), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+
+
+class ExperimentInspection(Base):
+    """实验巡检记录（实验跟踪）：实验过程中对样品与设备的巡检、检查与更换。"""
+
+    __tablename__ = "experiment_inspections"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    order_id: Mapped[int] = mapped_column(ForeignKey("entrust_orders.id"), index=True)
+    order: Mapped["EntrustOrder"] = relationship("EntrustOrder")
+    operator: Mapped[str] = mapped_column(String(64), default="")      # 巡检人
+    inspect_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)  # 巡检时间
+    sample_condition: Mapped[str] = mapped_column(String(16), default="正常")     # 样品状况 正常/异常
+    equipment_condition: Mapped[str] = mapped_column(String(16), default="正常")  # 设备状况 正常/异常
+    action: Mapped[str] = mapped_column(String(16), default="无")      # 无/更换样品/更换设备/报修
+    action_detail: Mapped[str] = mapped_column(String(256), default="")  # 处理详情（自动生成）
+    remark: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
 
 
@@ -337,10 +357,43 @@ class Report(Base):
     report_type: Mapped[str] = mapped_column(String(32), default="")  # 委托记录单 / 检测报告
     version: Mapped[str] = mapped_column(String(16), default="")      # 常规 / 检测（检测报告用）
     status: Mapped[str] = mapped_column(String(16), default="已签发")  # 草稿 / 已签发 / 已作废
+    content: Mapped[str] = mapped_column(Text, default="")             # 报告正文快照 HTML（编辑后签发时保存，空则实时生成）
+    docx_content: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)  # 报告正文快照 .docx（OnlyOffice 编辑后，打印/归档以它为准）
     issuer_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     issuer: Mapped["User | None"] = relationship("User", foreign_keys=[issuer_id])
     issued_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+
+
+class ReportDraft(Base):
+    """报告草稿：编辑保存后、签发前的正文快照（按 委托单+类型+版本 唯一）。"""
+    __tablename__ = "report_drafts"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    order_id: Mapped[int] = mapped_column(ForeignKey("entrust_orders.id"), index=True)
+    order: Mapped["EntrustOrder"] = relationship("EntrustOrder")
+    report_type: Mapped[str] = mapped_column(String(32), default="")   # 委托记录单 / 检测报告
+    version: Mapped[str] = mapped_column(String(16), default="")       # 常规 / 检测
+    content: Mapped[str] = mapped_column(Text, default="")             # 编辑后的报告正文 HTML（浏览器 HTML 编辑器）
+    docx_content: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)  # 编辑后的报告正文 .docx（OnlyOffice 编辑器）
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    __table_args__ = (UniqueConstraint("order_id", "report_type", "version", name="uq_report_draft_order_type_version"),)
+
+
+class ReportTemplate(Base):
+    """自定义报告模板库：.docx 二进制存 DB（避免落盘被 TSD 加密），按名称唯一。"""
+
+    __tablename__ = "report_templates"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    name: Mapped[str] = mapped_column(String(128), unique=True, index=True)  # 模板名称（唯一，作自定义报告 key）
+    filename: Mapped[str] = mapped_column(String(256), default="")           # 原始文件名
+    content: Mapped[bytes] = mapped_column(LargeBinary)                       # .docx 二进制
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False)          # 是否默认模板
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
 
 
 # ---------------------------------------------------------------------------

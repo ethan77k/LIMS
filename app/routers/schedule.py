@@ -62,6 +62,15 @@ def create_schedule(
     if data.plan_start is None:
         raise HTTPException(400, "预计开始时间必填")
 
+    # 实验员：不传则默认取委托单审核时指定的实验员；传了则校验角色
+    experimenter_id = data.experimenter_id or order.reviewer_id
+    if experimenter_id is not None:
+        experimenter = db.get(User, experimenter_id)
+        if experimenter is None:
+            raise HTTPException(400, "指定的实验员不存在")
+        if experimenter.role not in ("admin", "experimenter"):
+            raise HTTPException(400, "实验员必须为实验员或管理员角色")
+
     # 同一委托单内一台样机只允许一条排期（跨单复用不受限）
     dup = db.query(Schedule).filter(Schedule.order_id == order.id, Schedule.sample_id == sample.id).first()
     if dup is not None:
@@ -73,6 +82,7 @@ def create_schedule(
 
     schedule = Schedule(
         order_id=order.id, sample_id=sample.id, equipment_id=equipment.id,
+        experimenter_id=experimenter_id,
         experiment_hours=data.experiment_hours, transition_hours=data.transition_hours,
         total_hours=total, plan_start=plan_start, plan_end=plan_end, status="已排期",
     )
@@ -185,6 +195,7 @@ def schedule_order(
         for _ in range(a.count):
             db.add(Schedule(
                 order_id=order.id, sample_id=sample.id, equipment_id=equipment.id,
+                experimenter_id=order.reviewer_id,
                 experiment_hours=data.experiment_hours, transition_hours=data.transition_hours,
                 total_hours=total, plan_start=plan_start, plan_end=plan_end,
                 status="实验中", actual_start=now,

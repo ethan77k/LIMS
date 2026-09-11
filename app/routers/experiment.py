@@ -1,5 +1,5 @@
 """开始 / 结束实验，填写实验结果。"""
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -7,21 +7,51 @@ from sqlalchemy.orm import Session
 from ..audit import log
 from ..database import get_db
 from ..deps import require_roles
-from ..models import EntrustOrder, Sample, SampleOperation, Schedule, User
+from ..models import EntrustOrder, Equipment, Sample, SampleOperation, Schedule, User
 from ..notify import notify_entruster
-from ..schemas import ResultUpdate
+from ..schemas import ResultUpdate, ScheduleStart
 from ..serializers import order_to_dict, schedule_to_dict
 
 router = APIRouter(prefix="/api/experiment", tags=["experiment"])
 
 
 @router.post("/schedule/{schedule_id}/start")
-def start_schedule(schedule_id: int, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "experimenter"))):
+def start_schedule(
+    schedule_id: int,
+    data: ScheduleStart | None = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles("admin", "experimenter")),
+):
     schedule = db.get(Schedule, schedule_id)
     if schedule is None:
         raise HTTPException(404, "排期计划不存在")
     if schedule.status != "已排期":
         raise HTTPException(400, "该排期状态不可开始")
+
+    # 开始前可确认/修改：实验员、设备、预算实验时长
+    if data is not None:
+        if data.experimenter_id is not None:
+            exp = db.get(User, data.experimenter_id)
+            if exp is None:
+                raise HTTPException(400, "指定的实验员不存在")
+            if exp.role not in ("admin", "experimenter"):
+                raise HTTPException(400, "实验员必须为实验员或管理员角色")
+            schedule.experimenter_id = exp.id
+        if data.equipment_id is not None:
+            eq = db.get(Equipment, data.equipment_id)
+            if eq is None:
+                raise HTTPException(404, "设备不存在")
+            if eq.status in ("停用", "报废"):
+                raise HTTPException(400, "该设备已停用/报废，不可开始实验")
+            schedule.equipment_id = eq.id
+        if data.experiment_hours is not None:
+            if data.experiment_hours <= 0:
+                raise HTTPException(400, "预算实验时长必须大于 0")
+            schedule.experiment_hours = data.experiment_hours
+            schedule.total_hours = data.experiment_hours + schedule.transition_hours
+            if schedule.plan_start:
+                schedule.plan_end = schedule.plan_start + timedelta(hours=schedule.total_hours)
+
     schedule.status = "实验中"
     schedule.actual_start = datetime.now()
     sample = db.get(Sample, schedule.sample_id)
