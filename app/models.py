@@ -185,8 +185,8 @@ class Schedule(Base):
     order: Mapped["EntrustOrder"] = relationship("EntrustOrder", back_populates="schedules")
     sample_id: Mapped[int] = mapped_column(ForeignKey("samples.id"), index=True)
     sample: Mapped["Sample"] = relationship("Sample")
-    equipment_id: Mapped[int] = mapped_column(ForeignKey("equipments.id"), index=True)
-    equipment: Mapped["Equipment"] = relationship("Equipment")
+    equipment_id: Mapped[int | None] = mapped_column(ForeignKey("equipments.id"), nullable=True, index=True)
+    equipment: Mapped["Equipment | None"] = relationship("Equipment")
     experimenter_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)  # 实验员（默认审核时指定）
     experimenter: Mapped["User | None"] = relationship("User", foreign_keys=[experimenter_id])
 

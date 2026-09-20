@@ -32,14 +32,10 @@ def create_schedule(
     db: Session = Depends(get_db),
     user: User = Depends(require_roles("admin", "experimenter")),
 ):
+    """排期仅做「委托单 + 样品」分配；实验员/设备/用时/时间留到「实验开始」时填写。"""
     sample = db.get(Sample, data.sample_id)
     if sample is None:
         raise HTTPException(404, "样品不存在")
-    equipment = db.get(Equipment, data.equipment_id)
-    if equipment is None:
-        raise HTTPException(404, "设备不存在")
-    if equipment.status in ("停用", "报废"):
-        raise HTTPException(400, "该设备已停用/报废，不可排期")
 
     # 样品池样品（未绑单）需指定目标委托单；不再改写 sample.order_id，保留样机复用能力
     order_id = sample.order_id or data.order_id
@@ -62,43 +58,25 @@ def create_schedule(
     if data.plan_start is None:
         raise HTTPException(400, "预计开始时间必填")
 
-    # 实验员：不传则默认取委托单审核时指定的实验员；传了则校验角色
-    experimenter_id = data.experimenter_id or order.reviewer_id
-    if experimenter_id is not None:
-        experimenter = db.get(User, experimenter_id)
-        if experimenter is None:
-            raise HTTPException(400, "指定的实验员不存在")
-        if experimenter.role not in ("admin", "experimenter"):
-            raise HTTPException(400, "实验员必须为实验员或管理员角色")
-
     # 同一委托单内一台样机只允许一条排期（跨单复用不受限）
     dup = db.query(Schedule).filter(Schedule.order_id == order.id, Schedule.sample_id == sample.id).first()
     if dup is not None:
         raise HTTPException(400, f"样机 {sample.sample_no} 已在本委托单排期，不可重复排期")
 
-    total = data.experiment_hours + data.transition_hours
-    plan_start = data.plan_start
-    plan_end = plan_start + timedelta(hours=total) if plan_start else None
-
-    schedule = Schedule(
-        order_id=order.id, sample_id=sample.id, equipment_id=equipment.id,
-        experimenter_id=experimenter_id,
-        experiment_hours=data.experiment_hours, transition_hours=data.transition_hours,
-        total_hours=total, plan_start=plan_start, plan_end=plan_end, status="已排期",
-    )
+    schedule = Schedule(order_id=order.id, sample_id=sample.id, plan_start=data.plan_start, status="已排期")
     db.add(schedule)
 
     # 空闲（已接收/已完成）样机排期后进入「已排期」；已在「已排期/实验中」的保持不变（复用）
     if sample.status in ("已接收", "已完成"):
         sample.status = "已排期"
     db.add(SampleOperation(sample_id=sample.id, action="排期", operator=user.name,
-                           remark=f"排期至 {equipment.name}，用时 {total} 小时"))
+                           remark=f"排期至 {order.experiment_no or order.order_no}"))
 
     # 委托单进入已排期
     if order and order.status == "已审核":
         order.status = "已排期"
 
-    log(db, user, "排期", "schedule", schedule.id, f"{sample.sample_no} → {equipment.name}")
+    log(db, user, "排期", "schedule", schedule.id, f"{sample.sample_no}")
     db.commit()
     db.refresh(schedule)
     return schedule_to_dict(schedule)

@@ -15,6 +15,7 @@ from .security import hash_password
 def init_db():
     Base.metadata.create_all(bind=engine)
     _migrate_samples_rebuild()  # 需先于任何 Session 事务执行（samples 表重建）
+    _migrate_schedules_equipment_nullable()  # schedules 表重建：equipment_id 改可空（排期阶段不再选设备）
     db = SessionLocal()
     try:
         _seed_users(db)
@@ -79,6 +80,62 @@ def _migrate_samples_rebuild():
             conn.execute("CREATE INDEX ix_samples_status ON samples (status)")
             conn.execute("CREATE UNIQUE INDEX ix_samples_sample_no ON samples (sample_no)")
             conn.execute("CREATE INDEX ix_samples_batch_id ON samples (batch_id)")
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+    finally:
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.close()
+
+
+def _migrate_schedules_equipment_nullable():
+    """schedules 表重建：equipment_id 改可空（排期阶段不再选设备，设备留到「实验开始」时填）。幂等。
+
+    SQLite 的 ALTER TABLE 无法修改列约束，故整表重建（与 samples 重建同理）。
+    仅在 equipment_id 仍为 NOT NULL 时执行一次。
+    """
+    if engine.url.get_backend_name() != "sqlite":
+        return
+    path = engine.url.database
+    conn = sqlite3.connect(path)
+    try:
+        cols = {row[1]: row for row in conn.execute("PRAGMA table_info(schedules)").fetchall()}
+        if "equipment_id" not in cols or not cols["equipment_id"][3]:
+            return  # equipment_id 已可空，无需迁移
+        conn.execute("PRAGMA foreign_keys=OFF")
+        conn.execute("BEGIN")
+        try:
+            conn.execute(
+                "CREATE TABLE schedules_new ("
+                "id INTEGER NOT NULL PRIMARY KEY,"
+                "order_id INTEGER NOT NULL REFERENCES entrust_orders(id),"
+                "sample_id INTEGER NOT NULL REFERENCES samples(id),"
+                "equipment_id INTEGER REFERENCES equipments(id),"
+                "experiment_hours FLOAT NOT NULL,"
+                "transition_hours FLOAT NOT NULL,"
+                "total_hours FLOAT NOT NULL,"
+                "plan_start DATETIME,"
+                "plan_end DATETIME,"
+                "actual_start DATETIME,"
+                "actual_end DATETIME,"
+                "status VARCHAR(16) NOT NULL,"
+                "created_at DATETIME NOT NULL,"
+                "result VARCHAR(8) DEFAULT '',"
+                "experimenter_id INTEGER REFERENCES users(id),"
+                "is_draft BOOLEAN DEFAULT 0"
+                ")"
+            )
+            conn.execute(
+                "INSERT INTO schedules_new (id, order_id, sample_id, equipment_id, experiment_hours, transition_hours, total_hours, plan_start, plan_end, actual_start, actual_end, status, created_at, result, experimenter_id, is_draft) "
+                "SELECT id, order_id, sample_id, equipment_id, experiment_hours, transition_hours, total_hours, plan_start, plan_end, actual_start, actual_end, status, created_at, result, experimenter_id, is_draft FROM schedules"
+            )
+            conn.execute("DROP TABLE schedules")
+            conn.execute("ALTER TABLE schedules_new RENAME TO schedules")
+            conn.execute("CREATE INDEX ix_schedules_id ON schedules (id)")
+            conn.execute("CREATE INDEX ix_schedules_order_id ON schedules (order_id)")
+            conn.execute("CREATE INDEX ix_schedules_sample_id ON schedules (sample_id)")
+            conn.execute("CREATE INDEX ix_schedules_equipment_id ON schedules (equipment_id)")
             conn.execute("COMMIT")
         except Exception:
             conn.execute("ROLLBACK")

@@ -18,7 +18,7 @@ router = APIRouter(prefix="/api/experiment", tags=["experiment"])
 @router.post("/schedule/{schedule_id}/start")
 def start_schedule(
     schedule_id: int,
-    data: ScheduleStart | None = None,
+    data: ScheduleStart,
     db: Session = Depends(get_db),
     user: User = Depends(require_roles("admin", "experimenter")),
 ):
@@ -28,29 +28,37 @@ def start_schedule(
     if schedule.status != "已排期":
         raise HTTPException(400, "该排期状态不可开始")
 
-    # 开始前可确认/修改：实验员、设备、预算实验时长
-    if data is not None:
-        if data.experimenter_id is not None:
-            exp = db.get(User, data.experimenter_id)
-            if exp is None:
-                raise HTTPException(400, "指定的实验员不存在")
-            if exp.role not in ("admin", "experimenter"):
-                raise HTTPException(400, "实验员必须为实验员或管理员角色")
-            schedule.experimenter_id = exp.id
-        if data.equipment_id is not None:
-            eq = db.get(Equipment, data.equipment_id)
-            if eq is None:
-                raise HTTPException(404, "设备不存在")
-            if eq.status in ("停用", "报废"):
-                raise HTTPException(400, "该设备已停用/报废，不可开始实验")
-            schedule.equipment_id = eq.id
-        if data.experiment_hours is not None:
-            if data.experiment_hours <= 0:
-                raise HTTPException(400, "预算实验时长必须大于 0")
-            schedule.experiment_hours = data.experiment_hours
-            schedule.total_hours = data.experiment_hours + schedule.transition_hours
-            if schedule.plan_start:
-                schedule.plan_end = schedule.plan_start + timedelta(hours=schedule.total_hours)
+    # 开始实验时必填：设备、实验用时（预计开始时间已在排期时填写）
+    if data.equipment_id is None:
+        raise HTTPException(400, "请选择设备")
+    if data.experiment_hours is None or data.experiment_hours <= 0:
+        raise HTTPException(400, "实验用时必须大于 0")
+
+    eq = db.get(Equipment, data.equipment_id)
+    if eq is None:
+        raise HTTPException(404, "设备不存在")
+    if eq.status in ("停用", "报废"):
+        raise HTTPException(400, "该设备已停用/报废，不可开始实验")
+
+    # 实验员：不传则默认取委托单审核时指定的实验员
+    experimenter_id = data.experimenter_id
+    if experimenter_id is None:
+        _order = db.get(EntrustOrder, schedule.order_id)
+        experimenter_id = _order.reviewer_id if _order else None
+    if experimenter_id is not None:
+        exp = db.get(User, experimenter_id)
+        if exp is None:
+            raise HTTPException(400, "指定的实验员不存在")
+        if exp.role not in ("admin", "experimenter"):
+            raise HTTPException(400, "实验员必须为实验员或管理员角色")
+        schedule.experimenter_id = exp.id
+
+    transition_hours = data.transition_hours or 0.0
+    schedule.equipment_id = eq.id
+    schedule.experiment_hours = data.experiment_hours
+    schedule.transition_hours = transition_hours
+    schedule.total_hours = data.experiment_hours + transition_hours
+    schedule.plan_end = schedule.plan_start + timedelta(hours=schedule.total_hours) if schedule.plan_start else None
 
     schedule.status = "实验中"
     schedule.actual_start = datetime.now()
@@ -115,6 +123,75 @@ def update_result(data: ResultUpdate, db: Session = Depends(get_db), user: User 
         f"{schedule.sample.sample_no if schedule.sample else ''} = {data.result}")
     db.commit()
     return {"message": "结果已保存"}
+
+
+@router.post("/order/{order_id}/start")
+def start_order(
+    order_id: int,
+    data: ScheduleStart,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles("admin", "experimenter")),
+):
+    """整单开始实验：为该委托单所有「已排期」排期统一填写设备/实验员/用时并一次开始。"""
+    order = db.get(EntrustOrder, order_id)
+    if order is None:
+        raise HTTPException(404, "委托单不存在")
+    if order.status not in ("已排期", "实验中"):
+        raise HTTPException(400, f"委托单当前状态（{order.status}）不可开始实验")
+
+    # 开始实验时必填：设备、实验用时（预计开始时间已在排期时填写）
+    if data.equipment_id is None:
+        raise HTTPException(400, "请选择设备")
+    if data.experiment_hours is None or data.experiment_hours <= 0:
+        raise HTTPException(400, "实验用时必须大于 0")
+
+    eq = db.get(Equipment, data.equipment_id)
+    if eq is None:
+        raise HTTPException(404, "设备不存在")
+    if eq.status in ("停用", "报废"):
+        raise HTTPException(400, "该设备已停用/报废，不可开始实验")
+
+    # 实验员：不传则默认取委托单审核时指定的实验员
+    experimenter_id = data.experimenter_id
+    if experimenter_id is None:
+        experimenter_id = order.reviewer_id
+    if experimenter_id is not None:
+        exp = db.get(User, experimenter_id)
+        if exp is None:
+            raise HTTPException(400, "指定的实验员不存在")
+        if exp.role not in ("admin", "experimenter"):
+            raise HTTPException(400, "实验员必须为实验员或管理员角色")
+
+    transition_hours = data.transition_hours or 0.0
+    total_hours = data.experiment_hours + transition_hours
+    now = datetime.now()
+
+    schedules = [s for s in order.schedules if s.status == "已排期"]
+    if not schedules:
+        raise HTTPException(400, "该委托单没有待开始的排期")
+
+    started = 0
+    for schedule in schedules:
+        schedule.equipment_id = eq.id
+        schedule.experimenter_id = experimenter_id
+        schedule.experiment_hours = data.experiment_hours
+        schedule.transition_hours = transition_hours
+        schedule.total_hours = total_hours
+        schedule.plan_end = schedule.plan_start + timedelta(hours=total_hours) if schedule.plan_start else None
+        schedule.status = "实验中"
+        schedule.actual_start = now
+        sample = db.get(Sample, schedule.sample_id)
+        if sample:
+            sample.status = "实验中"
+            db.add(SampleOperation(sample_id=sample.id, action="开始实验", operator=user.name))
+        started += 1
+
+    if order.status in ("已排期", "已审核"):
+        order.status = "实验中"
+    log(db, user, "整单开始实验", "order", order.id,
+        f"{order.experiment_no or order.order_no} 开始 {started} 条排期 → {eq.name}")
+    db.commit()
+    return {"message": f"已开始 {started} 条排期", "count": started}
 
 
 @router.post("/order/{order_id}/finish")

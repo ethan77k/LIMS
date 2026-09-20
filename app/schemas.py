@@ -298,20 +298,18 @@ class SampleBatchConfirmRequest(BaseModel):
 # 排期
 # ---------------------------------------------------------------------------
 class ScheduleCreate(BaseModel):
+    """排期仅做「委托单 + 样品」分配；预计开始时间在排期时填写，其余在「实验开始」时填写。"""
     sample_id: int
-    equipment_id: int
-    experiment_hours: float = 0.0
-    transition_hours: float = 0.0
-    plan_start: datetime | None = None
     order_id: int | None = None     # 池样品排期时指定目标委托单
-    experimenter_id: int | None = None  # 实验员；不传则默认取委托单审核时指定的实验员
+    plan_start: datetime | None = None   # 预计开始时间（必填）
 
 
 class ScheduleStart(BaseModel):
-    """开始实验时可确认/修改：实验员、设备、预算实验时长。"""
+    """开始实验时填写：实验员、设备、实验用时、过渡用时（预计开始时间在排期时已填）。"""
     experimenter_id: int | None = None
     equipment_id: int | None = None
-    experiment_hours: float | None = None   # 预算实验时长（小时）
+    experiment_hours: float | None = None   # 实验用时（小时）
+    transition_hours: float | None = None   # 过渡用时（小时）
 
 
 class InspectionCreate(BaseModel):

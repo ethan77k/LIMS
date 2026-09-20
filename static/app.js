@@ -13,8 +13,8 @@ const state = reactive({
 
 /* ---------------- 角色权限与默认首页 ---------------- */
 const ROLE_ROUTES = {
-  admin: ['/dashboard', '/orders/new', '/orders/query', '/review', '/samples', '/schedule', '/expstart', '/exptrack', '/expend', '/reports', '/equipment', '/boards', '/handover', '/statistics', '/customers', '/audit', '/users', '/cases'],
-  experimenter: ['/dashboard', '/orders/query', '/review', '/samples', '/schedule', '/expstart', '/exptrack', '/expend', '/reports', '/boards', '/handover', '/statistics', '/customers', '/cases'],
+  admin: ['/dashboard', '/orders/new', '/orders/query', '/review', '/samples', '/schedule', '/expstart', '/expend', '/reports', '/equipment', '/boards', '/handover', '/statistics', '/customers', '/audit', '/users', '/cases'],
+  experimenter: ['/dashboard', '/orders/query', '/review', '/samples', '/schedule', '/expstart', '/expend', '/reports', '/boards', '/handover', '/statistics', '/customers', '/cases'],
   entruster: ['/orders/new', '/orders/query', '/cases'],
 };
 function homeRoute(role) { return role === 'entruster' ? '/orders/query' : '/dashboard'; }
@@ -30,6 +30,12 @@ async function api(path, method = 'GET', body = null) {
   if (res.status === 401) { logout(); throw new Error('未登录或登录已过期'); }
   if (!res.ok) throw new Error((data && data.detail) || (data && data.message) || '请求失败');
   return data;
+}
+
+// 报告/归档用 window.open('', '_blank') + document.write 打开，文档 URL 为 about:blank，
+// 相对路径图片（/uploads/...）会解析失败。注入 <base> 让它回指当前站点。
+function reportHtmlWithBase(html) {
+  return html.replace(/<head([^>]*)>/i, '<head$1><base href="' + location.origin + '/">');
 }
 
 function toast(msg, type = '') {
@@ -148,7 +154,7 @@ const MainLayout = {
           { group: '委托管理', links: [
             { r: '/orders/new', t: '委托申请' }, { r: '/orders/query', t: '委托查询' }, { r: '/review', t: '委托审核' }, { r: '/cases', t: '测试用例库' }] },
           { group: '实验管理', links: [
-            { r: '/samples', t: '样品管理' }, { r: '/schedule', t: '实验排期' }, { r: '/expstart', t: '实验开始' }, { r: '/exptrack', t: '实验跟踪' }, { r: '/expend', t: '实验结束' }] },
+            { r: '/samples', t: '样品管理' }, { r: '/schedule', t: '实验排期' }, { r: '/expstart', t: '实验开始' }, { r: '/expend', t: '实验结束' }] },
           { group: '报告', links: [{ r: '/reports', t: '实验报告' }] },
           { group: '统计', links: [{ r: '/statistics', t: '统计图表' }] },
           { group: '资源', links: [
@@ -160,7 +166,7 @@ const MainLayout = {
           { group: '委托管理', links: [
             { r: '/orders/query', t: '委托查询' }, { r: '/review', t: '委托审核' }, { r: '/cases', t: '测试用例库' }] },
           { group: '实验管理', links: [
-            { r: '/samples', t: '样品管理' }, { r: '/schedule', t: '实验排期' }, { r: '/expstart', t: '实验开始' }, { r: '/exptrack', t: '实验跟踪' }, { r: '/expend', t: '实验结束' }] },
+            { r: '/samples', t: '样品管理' }, { r: '/schedule', t: '实验排期' }, { r: '/expstart', t: '实验开始' }, { r: '/expend', t: '实验结束' }] },
           { group: '报告', links: [{ r: '/reports', t: '实验报告' }] },
           { group: '统计', links: [{ r: '/statistics', t: '统计图表' }] },
           { group: '资源', links: [{ r: '/boards', t: '展板' }, { r: '/handover', t: '交接班' }, { r: '/customers', t: '客户档案' }] },
@@ -174,7 +180,7 @@ const MainLayout = {
     title() {
       const m = {
         '/dashboard': '工作台', '/orders/new': '委托申请', '/orders/query': '委托查询', '/review': '委托审核',
-        '/samples': '样品管理', '/schedule': '实验排期', '/expstart': '实验开始', '/exptrack': '实验跟踪', '/expend': '实验结束', '/reports': '实验报告',
+        '/samples': '样品管理', '/schedule': '实验排期', '/expstart': '实验开始', '/expend': '实验结束', '/reports': '实验报告',
         '/equipment': '设备管理', '/boards': '展板', '/handover': '交接班', '/statistics': '统计图表',
         '/customers': '客户档案', '/audit': '审计日志', '/users': '用户管理', '/cases': '测试用例库',
       };
@@ -243,7 +249,6 @@ const MainLayout = {
         <samples-view v-else-if="state.route==='/samples'"></samples-view>
         <schedule-view v-else-if="state.route==='/schedule'"></schedule-view>
         <exp-start-view v-else-if="state.route==='/expstart'"></exp-start-view>
-        <exp-track-view v-else-if="state.route==='/exptrack'"></exp-track-view>
         <exp-end-view v-else-if="state.route==='/expend'"></exp-end-view>
         <reports-view v-else-if="state.route==='/reports'"></reports-view>
         <equipment-view v-else-if="state.route==='/equipment'"></equipment-view>
@@ -1407,7 +1412,7 @@ const SamplesView = {
 
 /* ---------------- 实验排期 ---------------- */
 const ScheduleView = {
-  data: () => ({ orders: [], cur: null, detail: null, eq: [], batches: [], curBatchId: null, experimenters: [], showModal: false, form: { sample_ids: [], equipment_id: null, experiment_hours: 4, transition_hours: 0, plan_start: '', experimenter_id: null } }),
+  data: () => ({ orders: [], cur: null, detail: null, batches: [], curBatchId: null, showModal: false, form: { sample_ids: [], plan_start: '' } }),
   computed: {
     needCount() { return this.detail ? (this.detail.sample_count || 0) : 0; },
     scheduledCount() { return (this.detail && this.detail.schedules) ? this.detail.schedules.length : 0; },
@@ -1417,8 +1422,6 @@ const ScheduleView = {
   methods: {
     async load() {
       this.orders = await api('/api/orders?status=');
-      this.eq = await api('/api/equipment');
-      this.experimenters = (await api('/api/auth/users')).filter(u => u.role !== 'entruster');
     },
     async open(o) {
       this.cur = o;
@@ -1430,8 +1433,7 @@ const ScheduleView = {
         })
         .filter(b => b.ok > 0);
       this.curBatchId = this.batches.length ? this.batches[0].id : null;
-      // 实验员默认带出审核时指定的实验员，可修改
-      this.form = { sample_ids: [], equipment_id: null, experiment_hours: 4, transition_hours: 0, plan_start: '', experimenter_id: this.detail.reviewer_id || null };
+      this.form = { sample_ids: [], plan_start: '' };
       this.showModal = true;
     },
     canPick(s) { return !s.order_id && ['已接收','已排期','实验中','已完成'].includes(s.status) && !this.scheduledFor(s); },
@@ -1440,20 +1442,11 @@ const ScheduleView = {
     async addSchedule() {
       try {
         if (!this.form.sample_ids.length) { toast('请选择样品', 'error'); return; }
-        if (!this.form.equipment_id) { toast('请选择设备', 'error'); return; }
         if (!this.form.plan_start) { toast('预计开始时间必填', 'error'); return; }
         const remain = this.needCount - this.scheduledCount;
         if (this.form.sample_ids.length > remain) { toast('已选 ' + this.form.sample_ids.length + ' 台，但还可再排 ' + remain + ' 条', 'error'); return; }
         for (const sid of this.form.sample_ids) {
-          await api('/api/schedules', 'POST', {
-            sample_id: sid,
-            order_id: this.cur.id,
-            equipment_id: this.form.equipment_id,
-            experiment_hours: Number(this.form.experiment_hours),
-            transition_hours: Number(this.form.transition_hours),
-            plan_start: this.form.plan_start || null,
-            experimenter_id: this.form.experimenter_id || null,
-          });
+          await api('/api/schedules', 'POST', { sample_id: sid, order_id: this.cur.id, plan_start: this.form.plan_start });
         }
         toast('已生成 ' + this.form.sample_ids.length + ' 条排期计划', 'success'); this.open(this.cur);
       } catch (e) { toast(e.message, 'error'); }
@@ -1536,35 +1529,25 @@ const ScheduleView = {
         </table>
       </div>
 
-      <div class="form-row" style="background:#f7f9fc;padding:12px;border-radius:6px;margin-top:12px">
-        <div class="form-group" style="flex:0 0 260px;margin-bottom:0"><label>实验员</label><select v-model="form.experimenter_id">
-          <option :value="null">默认（同审核时实验员）</option>
-          <option v-for="u in experimenters" :value="u.id">{{u.name}}（{{roleText(u.role)}}）</option>
-        </select></div>
-        <div style="color:var(--muted);font-size:12px;align-self:flex-end;padding-bottom:8px">默认带出审核时指定的实验员，可修改</div>
-      </div>
-
-      <div class="form-row" style="background:#f7f9fc;padding:12px;border-radius:6px;margin-top:12px">
-        <div class="form-group" style="flex:1 1 180px;margin-bottom:0"><label>设备</label><select v-model="form.equipment_id">
-          <option :value="null">选择设备</option>
-          <option v-for="e in eq" :value="e.id" :disabled="['停用','报废'].includes(e.status)">{{e.name}}（{{e.exp_type}}）</option>
-        </select></div>
-        <div class="form-group" style="flex:0 0 90px;margin-bottom:0"><label>实验用时(h)</label><input type="number" v-model.number="form.experiment_hours"></div>
-        <div class="form-group" style="flex:0 0 90px;margin-bottom:0"><label>过渡用时(h)</label><input type="number" v-model.number="form.transition_hours"></div>
-        <div class="form-group" style="flex:0 0 215px;margin-bottom:0"><label>预计开始时间 <span class="req">*</span></label><input type="datetime-local" v-model="form.plan_start"></div>
-        <div class="form-group" style="flex:0 0 auto;margin-bottom:0;align-self:flex-end"><button class="btn primary" :disabled="full" @click="addSchedule">生成排期计划</button></div>
+      <div style="background:#f7f9fc;padding:12px;border-radius:6px;margin-top:12px">
+        <div class="form-group" style="margin:0 0 10px">
+          <label>预计开始时间 <span class="req">*</span></label>
+          <input type="datetime-local" v-model="form.plan_start" style="max-width:260px">
+        </div>
+        <div class="form-row" style="margin:0">
+          <div style="color:var(--muted);font-size:12px;flex:1;align-self:center">实验员、设备、实验用时、过渡用时，请在「实验开始」模块中填写。</div>
+          <button class="btn primary" :disabled="full" @click="addSchedule">生成排期计划</button>
+        </div>
       </div>
 
       <div style="font-weight:600;margin:14px 0 6px">已生成排期计划</div>
-      <table class="tbl"><thead><tr><th>SN</th><th>样品编号</th><th>设备</th><th>实验员</th><th>总用时</th><th>预计开始</th><th>结果</th><th>状态</th><th>操作</th></tr></thead>
+      <table class="tbl"><thead><tr><th>SN</th><th>样品编号</th><th>状态</th><th>操作</th></tr></thead>
       <tbody>
         <tr v-for="s in detail.schedules" :key="s.id">
-          <td>{{s.sn||'-'}}</td><td>{{s.sample_no}}</td><td>{{s.equipment_name}}</td>
-          <td>{{s.experimenter_name||'-'}}</td>
-          <td>{{s.total_hours}}</td><td>{{fmtDT(s.plan_start)}}</td><td>{{s.result||'-'}}</td><td v-html="badge(s.status)"></td>
+          <td>{{s.sn||'-'}}</td><td>{{s.sample_no}}</td><td v-html="badge(s.status)"></td>
           <td><button class="btn link sm" v-if="s.status==='已排期'" @click="removeSchedule(s)">删除</button></td>
         </tr>
-        <tr v-if="!detail.schedules.length"><td colspan="9" class="empty">暂无排期计划，请在上方选择样品并填写排期信息后生成</td></tr>
+        <tr v-if="!detail.schedules.length"><td colspan="4" class="empty">暂无排期计划，请在上方选择样品后生成</td></tr>
       </tbody></table>
       <div class="modal-actions"><button class="btn" @click="showModal=false">关闭</button></div>
     </div>
@@ -1573,7 +1556,7 @@ const ScheduleView = {
 
 /* ---------------- 实验开始 ---------------- */
 const ExperimentStartView = {
-  data: () => ({ orders: [], cur: null, detail: null, showModal: false, startTarget: null, startForm: { experimenter_id: null, equipment_id: null, experiment_hours: 4 }, experimenters: [], eq: [] }),
+  data: () => ({ orders: [], cur: null, detail: null, showModal: false, startShow: false, startForm: { experimenter_id: null, equipment_id: null, experiment_hours: 4, transition_hours: 0 }, experimenters: [], eq: [] }),
   methods: {
     async load() {
       this.orders = await api('/api/orders?status=');
@@ -1581,21 +1564,27 @@ const ExperimentStartView = {
       this.eq = await api('/api/equipment');
     },
     async open(o) { this.cur = o; this.detail = await api('/api/orders/' + o.id); this.showModal = true; },
-    openStart(s) {
-      // 开始前确认：实验员/设备默认带出排期信息，可修改；预算实验时长默认排期实验用时
-      this.startTarget = s;
-      this.startForm = { experimenter_id: s.experimenter_id || null, equipment_id: s.equipment_id, experiment_hours: s.experiment_hours };
+    openStart() {
+      // 整单开始：实验员默认带出审核时指定的实验员，其余字段留待统一填写
+      this.startForm = {
+        experimenter_id: this.detail.reviewer_id || null,
+        equipment_id: null,
+        experiment_hours: 4,
+        transition_hours: 0,
+      };
+      this.startShow = true;
     },
     async confirmStart() {
       try {
         if (!this.startForm.equipment_id) { toast('请选择设备', 'error'); return; }
-        if (!(this.startForm.experiment_hours > 0)) { toast('预算实验时长必须大于 0', 'error'); return; }
-        await api('/api/experiment/schedule/' + this.startTarget.id + '/start', 'POST', {
+        if (!(this.startForm.experiment_hours > 0)) { toast('实验用时必须大于 0', 'error'); return; }
+        await api('/api/experiment/order/' + this.cur.id + '/start', 'POST', {
           experimenter_id: this.startForm.experimenter_id || null,
           equipment_id: this.startForm.equipment_id,
           experiment_hours: Number(this.startForm.experiment_hours),
+          transition_hours: Number(this.startForm.transition_hours || 0),
         });
-        this.startTarget = null; this.open(this.cur); toast('实验已开始', 'success');
+        this.startShow = false; this.open(this.cur); toast('实验已开始', 'success');
       } catch (e) { toast(e.message, 'error'); }
     },
     badge, fmtDT,
@@ -1618,135 +1607,39 @@ const ExperimentStartView = {
     <div class="modal" style="width:960px">
       <h3>实验开始 —— {{cur.experiment_no||cur.order_no}}</h3>
       <h4 style="margin:10px 0 6px">排期计划</h4>
-      <table class="tbl"><thead><tr><th>SN</th><th>样品编号</th><th>设备</th><th>实验员</th><th>状态</th><th>预计开始</th><th>操作</th></tr></thead>
+      <table class="tbl"><thead><tr><th>SN</th><th>样品编号</th><th>设备</th><th>实验员</th><th>状态</th><th>预计开始</th></tr></thead>
       <tbody>
         <tr v-for="s in detail.schedules" :key="s.id">
-          <td>{{s.sn||'-'}}</td><td>{{s.sample_no}}</td><td>{{s.equipment_name}}</td><td>{{s.experimenter_name||'-'}}</td>
+          <td>{{s.sn||'-'}}</td><td>{{s.sample_no}}</td><td>{{s.equipment_name||'-'}}</td><td>{{s.experimenter_name||'-'}}</td>
           <td v-html="badge(s.status)"></td><td>{{fmtDT(s.plan_start)}}</td>
-          <td><button class="btn success sm" v-if="s.status==='已排期'" @click="openStart(s)">开始</button></td>
         </tr>
-        <tr v-if="!detail.schedules.length"><td colspan="7" class="empty">暂无排期</td></tr>
+        <tr v-if="!detail.schedules.length"><td colspan="6" class="empty">暂无排期</td></tr>
       </tbody></table>
-      <div class="modal-actions"><button class="btn" @click="showModal=false">关闭</button></div>
+      <div class="modal-actions">
+        <button class="btn" @click="showModal=false">关闭</button>
+        <button class="btn success" v-if="detail.schedules.some(s => s.status==='已排期')" @click="openStart">开始实验</button>
+      </div>
     </div>
   </div>
-  <div class="modal-mask" v-if="startTarget" @click.self="startTarget=null">
+  <div class="modal-mask" v-if="startShow" @click.self="startShow=false">
     <div class="modal" style="width:480px">
-      <h3>开始实验 —— {{startTarget.sample_no}}</h3>
+      <h3>开始实验 —— {{cur.experiment_no||cur.order_no}}</h3>
+      <p style="color:var(--muted);font-size:12px;margin:4px 0 10px">将统一开始该委托单所有「已排期」的排期。</p>
       <div class="form-group"><label>实验员</label><select v-model="startForm.experimenter_id">
         <option :value="null">未指定</option>
         <option v-for="u in experimenters" :value="u.id">{{u.name}}（{{roleText(u.role)}}）</option>
       </select></div>
-      <div class="form-group"><label>设备</label><select v-model="startForm.equipment_id">
+      <div class="form-group"><label>设备 <span class="req">*</span></label><select v-model="startForm.equipment_id">
         <option :value="null">选择设备</option>
         <option v-for="e in eq" :value="e.id" :disabled="['停用','报废'].includes(e.status)">{{e.name}}（{{e.exp_type}}）</option>
       </select></div>
-      <div class="form-group"><label>预算实验时长(h)</label><input type="number" min="0" step="0.5" v-model.number="startForm.experiment_hours"></div>
-      <div class="modal-actions">
-        <button class="btn" @click="startTarget=null">取消</button>
-        <button class="btn success" @click="confirmStart">确认开始</button>
-      </div>
-    </div>
-  </div>`,
-};
-
-/* ---------------- 实验跟踪 ---------------- */
-const emptyInsp = () => ({ inspect_at: '', sample_condition: '正常', equipment_condition: '正常', action: '无', schedule_id: null, replacement_sample_id: null, replacement_equipment_id: null, remark: '' });
-const ExperimentTrackView = {
-  data: () => ({ orders: [], cur: null, detail: null, showModal: false, inspShow: false, insps: [], inspForm: emptyInsp(), poolSamples: [], eq: [] }),
-  methods: {
-    async load() { this.orders = await api('/api/orders?status='); this.poolSamples = await api('/api/samples?unbound=true'); this.eq = await api('/api/equipment'); },
-    async open(o) { this.cur = o; this.detail = await api('/api/orders/' + o.id); this.insps = await api('/api/inspections?order_id=' + o.id); this.showModal = true; },
-    openInsp() { this.inspForm = emptyInsp(); this.inspShow = true; },
-    runningSchedules() { return (this.detail && this.detail.schedules || []).filter(s => s.status === '实验中'); },
-    // 替换样机候选：样品池中可排、且未在本单排期
-    replaceSamples() {
-      const inOrder = new Set((this.detail && this.detail.schedules || []).map(s => s.sample_id));
-      return this.poolSamples.filter(s => ['已接收','已排期','实验中','已完成'].includes(s.status) && !inOrder.has(s.id));
-    },
-    async saveInsp() {
-      try {
-        if (this.inspForm.action === '更换样品' || this.inspForm.action === '更换设备') {
-          if (!this.inspForm.schedule_id) { toast('请选择要更换的排期（测试位）', 'error'); return; }
-        }
-        if (this.inspForm.action === '更换样品' && !this.inspForm.replacement_sample_id) { toast('请选择替换样机', 'error'); return; }
-        if (this.inspForm.action === '更换设备' && !this.inspForm.replacement_equipment_id) { toast('请选择替换设备', 'error'); return; }
-        await api('/api/inspections', 'POST', { ...this.inspForm, order_id: this.cur.id, inspect_at: this.inspForm.inspect_at || null });
-        this.inspShow = false; this.open(this.cur); toast('巡检记录已保存', 'success');
-      } catch (e) { toast(e.message, 'error'); }
-    },
-    badge, fmtDT,
-  },
-  mounted() { this.load(); },
-  template: `
-  <div class="card">
-    <h3>实验跟踪</h3>
-    <table class="tbl"><thead><tr><th>实验编号</th><th>委托单位</th><th>检测项目</th><th>状态</th><th>操作</th></tr></thead>
-    <tbody>
-      <template v-for="o in orders" :key="o.id">
-        <tr v-if="o.status==='实验中'">
-          <td>{{o.experiment_no||o.order_no}}</td><td>{{o.entrust_org}}</td><td>{{o.test_item}}</td>
-          <td v-html="badge(o.status)"></td><td><button class="btn primary sm" @click="open(o)">实验跟踪</button></td>
-        </tr>
-      </template>
-    </tbody></table>
-  </div>
-  <div class="modal-mask" v-if="showModal" @click.self="showModal=false">
-    <div class="modal" style="width:980px">
-      <h3>实验跟踪 —— {{cur.experiment_no||cur.order_no}}</h3>
-      <h4 style="margin:10px 0 6px">进行中的测试位</h4>
-      <table class="tbl"><thead><tr><th>SN</th><th>样品编号</th><th>设备</th><th>实验员</th><th>状态</th><th>实际开始</th></tr></thead>
-      <tbody>
-        <tr v-for="s in runningSchedules()" :key="s.id">
-          <td>{{s.sn||'-'}}</td><td>{{s.sample_no}}</td><td>{{s.equipment_name}}</td><td>{{s.experimenter_name||'-'}}</td>
-          <td v-html="badge(s.status)"></td><td>{{fmtDT(s.actual_start)}}</td>
-        </tr>
-        <tr v-if="!runningSchedules().length"><td colspan="6" class="empty">暂无进行中的实验</td></tr>
-      </tbody></table>
-      <div style="display:flex;align-items:center;margin:16px 0 6px">
-        <h4 style="margin:0;flex:1">巡检记录</h4>
-        <button class="btn primary sm" @click="openInsp">+ 新增巡检</button>
-      </div>
-      <table class="tbl"><thead><tr><th>巡检时间</th><th>巡检人</th><th>样品状况</th><th>设备状况</th><th>处理措施</th><th>处理详情</th><th>备注</th></tr></thead>
-      <tbody>
-        <tr v-for="x in insps" :key="x.id">
-          <td>{{fmtDT(x.inspect_at)}}</td><td>{{x.operator}}</td>
-          <td>{{x.sample_condition}}</td><td>{{x.equipment_condition}}</td>
-          <td><span v-html="badge(x.action, {'无':'gray','更换样品':'orange','更换设备':'orange','报修':'red'})"></span></td>
-          <td>{{x.action_detail||'-'}}</td><td>{{x.remark||'-'}}</td>
-        </tr>
-        <tr v-if="!insps.length"><td colspan="7" class="empty">暂无巡检记录</td></tr>
-      </tbody></table>
-      <div class="modal-actions"><button class="btn" @click="showModal=false">关闭</button></div>
-    </div>
-  </div>
-  <div class="modal-mask" v-if="inspShow" @click.self="inspShow=false">
-    <div class="modal" style="width:560px">
-      <h3>新增巡检记录 —— {{cur.experiment_no||cur.order_no}}</h3>
       <div class="form-row">
-        <div class="form-group" style="flex:1"><label>巡检时间</label><input type="datetime-local" v-model="inspForm.inspect_at"></div>
-        <div class="form-group" style="flex:1"><label>样品状况</label><select v-model="inspForm.sample_condition"><option>正常</option><option>异常</option></select></div>
-        <div class="form-group" style="flex:1"><label>设备状况</label><select v-model="inspForm.equipment_condition"><option>正常</option><option>异常</option></select></div>
+        <div class="form-group" style="flex:1"><label>实验用时(h) <span class="req">*</span></label><input type="number" min="0" step="0.5" v-model.number="startForm.experiment_hours"></div>
+        <div class="form-group" style="flex:1"><label>过渡用时(h)</label><input type="number" min="0" step="0.5" v-model.number="startForm.transition_hours"></div>
       </div>
-      <div class="form-group"><label>处理措施</label><select v-model="inspForm.action">
-        <option value="无">无</option><option value="更换样品">更换样品</option><option value="更换设备">更换设备</option><option value="报修">报修</option>
-      </select></div>
-      <div class="form-group" v-if="inspForm.action==='更换样品' || inspForm.action==='更换设备'"><label>目标排期（测试位）</label><select v-model="inspForm.schedule_id">
-        <option :value="null">选择测试位</option>
-        <option v-for="s in runningSchedules()" :value="s.id">{{s.sample_no}}（SN {{s.sn||'-'}}）→ {{s.equipment_name}}</option>
-      </select></div>
-      <div class="form-group" v-if="inspForm.action==='更换样品'"><label>替换样机（样品池）</label><select v-model="inspForm.replacement_sample_id">
-        <option :value="null">选择替换样机</option>
-        <option v-for="s in replaceSamples()" :value="s.id">{{s.sample_no}}（SN {{s.sn||'-'}}，{{s.status}}）</option>
-      </select></div>
-      <div class="form-group" v-if="inspForm.action==='更换设备'"><label>替换设备</label><select v-model="inspForm.replacement_equipment_id">
-        <option :value="null">选择替换设备</option>
-        <option v-for="e in eq" :value="e.id" :disabled="['停用','报废'].includes(e.status)">{{e.name}}（{{e.exp_type}}）</option>
-      </select></div>
-      <div class="form-group"><label>备注</label><textarea v-model="inspForm.remark" rows="3"></textarea></div>
       <div class="modal-actions">
-        <button class="btn" @click="inspShow=false">取消</button>
-        <button class="btn success" @click="saveInsp">保存巡检记录</button>
+        <button class="btn" @click="startShow=false">取消</button>
+        <button class="btn success" @click="confirmStart">确认开始</button>
       </div>
     </div>
   </div>`,
@@ -1841,7 +1734,7 @@ const ReportsView = {
       try {
         const url = '/api/reports/' + kind + '/' + this.cur.id + (version ? '?version=' + encodeURIComponent(version) : '');
         const html = await api(url);
-        w.document.write(html); w.document.close();
+        w.document.write(reportHtmlWithBase(html)); w.document.close();
       } catch (e) { w.close(); toast(e.message, 'error'); }
     },
     async issue(report_type, version) {
@@ -1853,7 +1746,7 @@ const ReportsView = {
       if (!w) { toast('请允许浏览器弹出新窗口', 'error'); return; }
       try {
         const html = await api('/api/reports/archive/' + r.id + '/view');
-        w.document.write(html); w.document.close();
+        w.document.write(reportHtmlWithBase(html)); w.document.close();
       } catch (e) { w.close(); toast(e.message, 'error'); }
     },
     async delArchive(r) { if (confirm('确认作废报告 ' + r.report_no + '？')) { await api('/api/reports/archive/' + r.id, 'DELETE'); this.loadArchive(); } },
@@ -1906,7 +1799,7 @@ const ReportsView = {
       if (!w) { toast('请允许浏览器弹出新窗口', 'error'); return; }
       let html = '<!DOCTYPE html>' + doc.documentElement.outerHTML;
       html = html.replace('</body>', '<script>window.print()<\/script></body>');
-      w.document.write(html); w.document.close();
+      w.document.write(reportHtmlWithBase(html)); w.document.close();
     },
     async openWord() {
       try {
@@ -2589,7 +2482,7 @@ function emptyCustomer() { return { name: '', contact: '', phone: '', email: '',
 const RootApp = {
   components: {
     LoginPage, PublicPage, MainLayout, Dashboard, OrderNew, OrderQuery, ReviewView,
-    SamplesView, ScheduleView, ExperimentStartView, ExperimentTrackView, ExperimentEndView, ReportsView, EquipmentView, BoardsView, HandoverView, UsersView,
+    SamplesView, ScheduleView, ExperimentStartView, ExperimentEndView, ReportsView, EquipmentView, BoardsView, HandoverView, UsersView,
     StatisticsView, AuditLogView, CustomersView, TestCaseLibrary,
   },
   data: () => ({ allEq: [], reviewId: null }),
@@ -2611,7 +2504,7 @@ const RootApp = {
 };
 
 /* ---------------- 路由 ---------------- */
-const routes = ['/dashboard', '/orders/new', '/orders/query', '/review', '/samples', '/schedule', '/expstart', '/exptrack', '/expend', '/reports', '/equipment', '/boards', '/handover', '/statistics', '/customers', '/audit', '/users', '/cases'];
+const routes = ['/dashboard', '/orders/new', '/orders/query', '/review', '/samples', '/schedule', '/expstart', '/expend', '/reports', '/equipment', '/boards', '/handover', '/statistics', '/customers', '/audit', '/users', '/cases'];
 function applyRoute() {
   const h = location.hash.slice(1);
   const home = homeRoute(state.role);
@@ -2631,7 +2524,7 @@ const _components = {
   'login-page': LoginPage, 'public-page': PublicPage, 'main-layout': MainLayout,
   'dashboard': Dashboard, 'order-new': OrderNew, 'order-query': OrderQuery,
   'review-view': ReviewView, 'samples-view': SamplesView, 'schedule-view': ScheduleView,
-  'exp-start-view': ExperimentStartView, 'exp-track-view': ExperimentTrackView, 'exp-end-view': ExperimentEndView,
+  'exp-start-view': ExperimentStartView, 'exp-end-view': ExperimentEndView,
   'reports-view': ReportsView, 'equipment-view': EquipmentView,
   'boards-view': BoardsView, 'handover-view': HandoverView, 'users-view': UsersView,
   'statistics-view': StatisticsView, 'customers-view': CustomersView, 'audit-view': AuditLogView,
