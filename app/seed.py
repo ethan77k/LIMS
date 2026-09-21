@@ -33,6 +33,7 @@ def init_db():
         _migrate_schedules_experimenter(db)
         _migrate_report_content(db)
         _migrate_report_docx(db)
+        _migrate_schedules_sample_prev_status(db)
         db.commit()
     finally:
         db.close()
@@ -249,6 +250,14 @@ def _migrate_schedules_experimenter(db):
             "UPDATE schedules SET experimenter_id = "
             "(SELECT reviewer_id FROM entrust_orders WHERE entrust_orders.id = schedules.order_id)"
         ))
+        db.commit()
+
+
+def _migrate_schedules_sample_prev_status(db):
+    """为 schedules 增加 sample_prev_status（排期前样品状态）列，删除排期时按此回退样品状态（幂等）。"""
+    cols = [row[1] for row in db.execute(text("PRAGMA table_info(schedules)"))]
+    if "sample_prev_status" not in cols:
+        db.execute(text("ALTER TABLE schedules ADD COLUMN sample_prev_status VARCHAR(16) DEFAULT ''"))
         db.commit()
 
 

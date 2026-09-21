@@ -298,10 +298,11 @@ class SampleBatchConfirmRequest(BaseModel):
 # 排期
 # ---------------------------------------------------------------------------
 class ScheduleCreate(BaseModel):
-    """排期仅做「委托单 + 样品」分配；预计开始时间在排期时填写，其余在「实验开始」时填写。"""
+    """排期仅做「委托单 + 样品」分配；预计开始/完成时间在排期时填写，其余在「实验开始」时填写。"""
     sample_id: int
     order_id: int | None = None     # 池样品排期时指定目标委托单
     plan_start: datetime | None = None   # 预计开始时间（必填）
+    plan_end: datetime | None = None     # 预计完成时间（必填）
 
 
 class ScheduleStart(BaseModel):
@@ -323,22 +324,6 @@ class InspectionCreate(BaseModel):
     replacement_sample_id: int | None = None    # 更换样品时：替换样机
     replacement_equipment_id: int | None = None # 更换设备时：替换设备
     remark: str = ""
-
-
-class SampleAssignment(BaseModel):
-    """一次排期里，某台实物样机承担的测试位数量（复用次数）。"""
-    sample_id: int
-    count: int = 1      # 复用次数：该样机承担几个测试位
-
-
-class OrderBatchScheduleRequest(BaseModel):
-    """整单批量排期：从样品池选已确认（已接收）实物样机，按复用次数覆盖委托单需求数量，
-    一次性生成排期（每个测试位一条）并自动开始实验。"""
-    equipment_id: int
-    assignments: list[SampleAssignment] = []
-    experiment_hours: float = 0.0
-    transition_hours: float = 0.0
-    plan_start: datetime | None = None
 
 
 # ---------------------------------------------------------------------------

@@ -1412,7 +1412,7 @@ const SamplesView = {
 
 /* ---------------- 实验排期 ---------------- */
 const ScheduleView = {
-  data: () => ({ orders: [], cur: null, detail: null, batches: [], curBatchId: null, showModal: false, form: { sample_ids: [], plan_start: '' } }),
+  data: () => ({ orders: [], cur: null, detail: null, batches: [], curBatchId: null, showModal: false, form: { sample_ids: [], plan_start: '', plan_end: '' } }),
   computed: {
     needCount() { return this.detail ? (this.detail.sample_count || 0) : 0; },
     scheduledCount() { return (this.detail && this.detail.schedules) ? this.detail.schedules.length : 0; },
@@ -1433,7 +1433,7 @@ const ScheduleView = {
         })
         .filter(b => b.ok > 0);
       this.curBatchId = this.batches.length ? this.batches[0].id : null;
-      this.form = { sample_ids: [], plan_start: '' };
+      this.form = { sample_ids: [], plan_start: '', plan_end: '' };
       this.showModal = true;
     },
     canPick(s) { return !s.order_id && ['已接收','已排期','实验中','已完成'].includes(s.status) && !this.scheduledFor(s); },
@@ -1443,12 +1443,27 @@ const ScheduleView = {
       try {
         if (!this.form.sample_ids.length) { toast('请选择样品', 'error'); return; }
         if (!this.form.plan_start) { toast('预计开始时间必填', 'error'); return; }
+        if (!this.form.plan_end) { toast('预计完成时间必填', 'error'); return; }
+        if (new Date(this.form.plan_end) <= new Date(this.form.plan_start)) { toast('预计完成时间必须晚于预计开始时间', 'error'); return; }
         const remain = this.needCount - this.scheduledCount;
         if (this.form.sample_ids.length > remain) { toast('已选 ' + this.form.sample_ids.length + ' 台，但还可再排 ' + remain + ' 条', 'error'); return; }
+        const ok = [], fail = [];
         for (const sid of this.form.sample_ids) {
-          await api('/api/schedules', 'POST', { sample_id: sid, order_id: this.cur.id, plan_start: this.form.plan_start });
+          try {
+            await api('/api/schedules', 'POST', { sample_id: sid, order_id: this.cur.id, plan_start: this.form.plan_start, plan_end: this.form.plan_end });
+            ok.push(sid);
+          } catch (e) {
+            fail.push(e.message);
+          }
         }
-        toast('已生成 ' + this.form.sample_ids.length + ' 条排期计划', 'success'); this.open(this.cur);
+        if (fail.length === 0) {
+          toast('已生成 ' + ok.length + ' 条排期计划', 'success');
+        } else if (ok.length === 0) {
+          toast('排期失败：' + fail[0], 'error');
+        } else {
+          toast('成功 ' + ok.length + ' 条，失败 ' + fail.length + ' 条：' + fail[0], 'error');
+        }
+        this.open(this.cur);
       } catch (e) { toast(e.message, 'error'); }
     },
     async removeSchedule(s) {
@@ -1465,7 +1480,7 @@ const ScheduleView = {
     <table class="tbl"><thead><tr><th>实验编号</th><th>委托单位</th><th>委托人</th><th>DHD型号</th><th>检测项目</th><th>需求数量</th><th>状态</th><th>操作</th></tr></thead>
     <tbody>
       <template v-for="o in orders" :key="o.id">
-        <tr v-if="['已审核','已排期','实验中'].includes(o.status)">
+        <tr v-if="['已审核','已排期'].includes(o.status)">
           <td>{{o.experiment_no||o.order_no}}</td><td>{{o.entrust_org}}</td><td>{{o.entruster||'-'}}</td><td>{{o.sample_model||'-'}}</td><td>{{o.test_item}}</td>
           <td>{{o.sample_count}} {{o.sample_unit}}</td>
           <td v-html="badge(o.status)"></td><td><button class="btn primary sm" @click="open(o)">排期</button></td>
@@ -1530,9 +1545,15 @@ const ScheduleView = {
       </div>
 
       <div style="background:#f7f9fc;padding:12px;border-radius:6px;margin-top:12px">
-        <div class="form-group" style="margin:0 0 10px">
-          <label>预计开始时间 <span class="req">*</span></label>
-          <input type="datetime-local" v-model="form.plan_start" style="max-width:260px">
+        <div class="form-row" style="margin:0 0 10px">
+          <div class="form-group" style="margin:0">
+            <label>预计开始时间 <span class="req">*</span></label>
+            <input type="datetime-local" v-model="form.plan_start" style="max-width:260px">
+          </div>
+          <div class="form-group" style="margin:0">
+            <label>预计完成时间 <span class="req">*</span></label>
+            <input type="datetime-local" v-model="form.plan_end" :min="form.plan_start" style="max-width:260px">
+          </div>
         </div>
         <div class="form-row" style="margin:0">
           <div style="color:var(--muted);font-size:12px;flex:1;align-self:center">实验员、设备、实验用时、过渡用时，请在「实验开始」模块中填写。</div>
@@ -1541,13 +1562,13 @@ const ScheduleView = {
       </div>
 
       <div style="font-weight:600;margin:14px 0 6px">已生成排期计划</div>
-      <table class="tbl"><thead><tr><th>SN</th><th>样品编号</th><th>状态</th><th>操作</th></tr></thead>
+      <table class="tbl"><thead><tr><th>SN</th><th>样品编号</th><th>预计开始</th><th>预计完成</th><th>状态</th><th>操作</th></tr></thead>
       <tbody>
         <tr v-for="s in detail.schedules" :key="s.id">
-          <td>{{s.sn||'-'}}</td><td>{{s.sample_no}}</td><td v-html="badge(s.status)"></td>
+          <td>{{s.sn||'-'}}</td><td>{{s.sample_no}}</td><td>{{fmtDT(s.plan_start)}}</td><td>{{fmtDT(s.plan_end)}}</td><td v-html="badge(s.status)"></td>
           <td><button class="btn link sm" v-if="s.status==='已排期'" @click="removeSchedule(s)">删除</button></td>
         </tr>
-        <tr v-if="!detail.schedules.length"><td colspan="4" class="empty">暂无排期计划，请在上方选择样品后生成</td></tr>
+        <tr v-if="!detail.schedules.length"><td colspan="6" class="empty">暂无排期计划，请在上方选择样品后生成</td></tr>
       </tbody></table>
       <div class="modal-actions"><button class="btn" @click="showModal=false">关闭</button></div>
     </div>
@@ -1596,7 +1617,7 @@ const ExperimentStartView = {
     <table class="tbl"><thead><tr><th>实验编号</th><th>委托单位</th><th>检测项目</th><th>状态</th><th>操作</th></tr></thead>
     <tbody>
       <template v-for="o in orders" :key="o.id">
-        <tr v-if="['已排期','实验中'].includes(o.status)">
+        <tr v-if="['已排期'].includes(o.status)">
           <td>{{o.experiment_no||o.order_no}}</td><td>{{o.entrust_org}}</td><td>{{o.test_item}}</td>
           <td v-html="badge(o.status)"></td><td><button class="btn primary sm" @click="open(o)">开始实验</button></td>
         </tr>
@@ -1667,7 +1688,7 @@ const ExperimentEndView = {
     <table class="tbl"><thead><tr><th>实验编号</th><th>委托单位</th><th>检测项目</th><th>状态</th><th>操作</th></tr></thead>
     <tbody>
       <template v-for="o in orders" :key="o.id">
-        <tr v-if="['已排期','实验中'].includes(o.status)">
+        <tr v-if="['实验中'].includes(o.status)">
           <td>{{o.experiment_no||o.order_no}}</td><td>{{o.entrust_org}}</td><td>{{o.test_item}}</td>
           <td v-html="badge(o.status)"></td><td><button class="btn primary sm" @click="open(o)">结束实验</button></td>
         </tr>
@@ -1897,7 +1918,7 @@ const ReportsView = {
       <table class="tbl"><thead><tr><th>实验编号</th><th>委托单位</th><th>检测项目</th><th>状态</th><th>操作</th></tr></thead>
       <tbody>
         <template v-for="o in orders" :key="o.id">
-          <tr v-if="o.status!=='待审核' && o.status!=='已否决'">
+          <tr v-if="o.status==='已完成'">
             <td><a class="link" @click="openEdit(o)">{{o.experiment_no||o.order_no}}</a></td><td>{{o.entrust_org}}</td><td>{{o.test_item}}</td>
             <td v-html="badge(o.status)"></td><td><button class="btn primary sm" :disabled="!hasAnyDraft(o)" @click="open(o)">生成报告</button></td>
           </tr>

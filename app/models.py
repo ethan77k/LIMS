@@ -200,6 +200,7 @@ class Schedule(Base):
     actual_end: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     result: Mapped[str] = mapped_column(String(8), default="")              # 该测试位结果 OK / NG
+    sample_prev_status: Mapped[str] = mapped_column(String(16), default="")  # 排期前样品状态（删除排期时回退用）
     status: Mapped[str] = mapped_column(String(16), default="已排期")  # 已排期 / 实验中 / 已完成
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
 

@@ -136,7 +136,7 @@ def start_order(
     order = db.get(EntrustOrder, order_id)
     if order is None:
         raise HTTPException(404, "委托单不存在")
-    if order.status not in ("已排期", "实验中"):
+    if order.status not in ("已排期",):
         raise HTTPException(400, f"委托单当前状态（{order.status}）不可开始实验")
 
     # 开始实验时必填：设备、实验用时（预计开始时间已在排期时填写）
