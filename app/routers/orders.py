@@ -66,6 +66,25 @@ def _get_order(db: Session, order_id: int) -> EntrustOrder:
     return order
 
 
+def _order_list_item(o: EntrustOrder) -> dict:
+    """列表项：补充实验员姓名、排期预估起止时间（多条取最早开始/最晚完成）、实际开始时间（取最早）。"""
+    d = order_to_dict(o, with_detail=False)
+    d["reviewer_name"] = o.reviewer.name if o.reviewer else ""
+    starts = [s.plan_start for s in o.schedules if s.plan_start]
+    ends = [s.plan_end for s in o.schedules if s.plan_end]
+    actuals = [s.actual_start for s in o.schedules if s.actual_start]
+    d["plan_start_min"] = min(starts).isoformat() if starts else None
+    d["plan_end_max"] = max(ends).isoformat() if ends else None
+    d["actual_start_min"] = min(actuals).isoformat() if actuals else None
+    # 实验员：最终以「实验开始」时排期确认的实验员为准（多条排期去重）；未开始时为空
+    names = []
+    for s in o.schedules:
+        if s.experimenter and s.experimenter.name and s.experimenter.name not in names:
+            names.append(s.experimenter.name)
+    d["experimenter_name"] = "、".join(names)
+    return d
+
+
 @router.post("")
 def create_order(
     data: OrderCreate,
@@ -142,13 +161,18 @@ def list_orders(
             EntrustOrder.sample_name.like(like),
         ))
     # 未传 page 时保持返回数组（兼容旧前端）；传 page 时返回分页结构
+    _list_opts = (
+        selectinload(EntrustOrder.images),
+        selectinload(EntrustOrder.reviewer),
+        selectinload(EntrustOrder.schedules).selectinload(Schedule.experimenter),
+    )
     if page is None:
-        orders = q.options(selectinload(EntrustOrder.images)).order_by(EntrustOrder.id.desc()).all()
-        return [order_to_dict(o, with_detail=False) for o in orders]
+        orders = q.options(*_list_opts).order_by(EntrustOrder.id.desc()).all()
+        return [_order_list_item(o) for o in orders]
     size = size or 20
     total = q.count()
-    rows = q.options(selectinload(EntrustOrder.images)).order_by(EntrustOrder.id.desc()).offset((page - 1) * size).limit(size).all()
-    return {"total": total, "page": page, "size": size, "items": [order_to_dict(o, with_detail=False) for o in rows]}
+    rows = q.options(*_list_opts).order_by(EntrustOrder.id.desc()).offset((page - 1) * size).limit(size).all()
+    return {"total": total, "page": page, "size": size, "items": [_order_list_item(o) for o in rows]}
 
 
 @router.get("/query")

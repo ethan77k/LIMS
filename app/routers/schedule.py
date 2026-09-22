@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from ..audit import log
 from ..database import get_db
 from ..deps import require_roles
-from ..models import EntrustOrder, Sample, SampleOperation, Schedule, User
+from ..models import EntrustOrder, Equipment, Sample, SampleOperation, Schedule, User
 from ..schemas import ScheduleCreate
 from ..serializers import schedule_to_dict
 
@@ -60,13 +60,36 @@ def create_schedule(
     if data.plan_end <= data.plan_start:
         raise HTTPException(400, "预计完成时间必须晚于预计开始时间")
 
+    # 设备（选填）：填写后校验设备存在且可用，并做设备占用冲突校验（同一设备「已排期」时间段不可重叠）
+    if data.equipment_id is not None:
+        equipment = db.get(Equipment, data.equipment_id)
+        if equipment is None:
+            raise HTTPException(404, "设备不存在")
+        if equipment.status in ("停用", "报废"):
+            raise HTTPException(400, "该设备已停用/报废，不可排期")
+        conflicts = (
+            db.query(Schedule)
+            .filter(
+                Schedule.equipment_id == data.equipment_id,
+                Schedule.status == "已排期",
+                Schedule.plan_end > data.plan_start,
+                Schedule.plan_start < data.plan_end,
+            )
+            .all()
+        )
+        if conflicts:
+            def _fmt(dt):
+                return dt.strftime("%m-%d %H:%M") if dt else "?"
+            spans = "、".join(f"{_fmt(c.plan_start)}~{_fmt(c.plan_end)}" for c in conflicts)
+            raise HTTPException(400, f"设备「{equipment.name}」在所选时间段已被占用（{spans}），请调整预计开始/完成时间")
+
     # 同一委托单内一台样机只允许一条排期（跨单复用不受限）
     dup = db.query(Schedule).filter(Schedule.order_id == order.id, Schedule.sample_id == sample.id).first()
     if dup is not None:
         raise HTTPException(400, f"样机 {sample.sample_no} 已在本委托单排期，不可重复排期")
 
-    schedule = Schedule(order_id=order.id, sample_id=sample.id, plan_start=data.plan_start,
-                        plan_end=data.plan_end, sample_prev_status=sample.status, status="已排期")
+    schedule = Schedule(order_id=order.id, sample_id=sample.id, equipment_id=data.equipment_id,
+                        plan_start=data.plan_start, plan_end=data.plan_end, sample_prev_status=sample.status, status="已排期")
     db.add(schedule)
 
     # 空闲（已接收/已完成）样机排期后进入「已排期」；已在「已排期/实验中」的保持不变（复用）

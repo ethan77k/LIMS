@@ -1412,20 +1412,30 @@ const SamplesView = {
 
 /* ---------------- 实验排期 ---------------- */
 const ScheduleView = {
-  data: () => ({ orders: [], cur: null, detail: null, batches: [], curBatchId: null, showModal: false, form: { sample_ids: [], plan_start: '', plan_end: '' } }),
+  data: () => ({ orders: [], cur: null, detail: null, batches: [], curBatchId: null, eq: [], allSchedules: [], lastStart: '', lastEnd: '', showModal: false, form: { sample_ids: [], equipment_id: null, plan_start: '', plan_end: '' } }),
   computed: {
     needCount() { return this.detail ? (this.detail.sample_count || 0) : 0; },
     scheduledCount() { return (this.detail && this.detail.schedules) ? this.detail.schedules.length : 0; },
     full() { return this.scheduledCount >= this.needCount; },
     curBatch() { return this.batches.find(b => b.id === this.curBatchId) || null; },
+    busyRanges() {
+      if (!this.form.equipment_id) return [];
+      return (this.allSchedules || [])
+        .filter(s => s.equipment_id === this.form.equipment_id && s.status === '已排期' && s.plan_start && s.plan_end)
+        .map(s => ({ start: s.plan_start, end: s.plan_end, order_no: s.order_no, sample_no: s.sample_no }))
+        .sort((a, b) => new Date(a.start) - new Date(b.start));
+    },
+    conflict() { return this.overlapBusy(this.form.plan_start, this.form.plan_end); },
   },
   methods: {
     async load() {
       this.orders = await api('/api/orders?status=');
+      this.eq = await api('/api/equipment');
     },
     async open(o) {
       this.cur = o;
       this.detail = await api('/api/orders/' + o.id);
+      this.allSchedules = await api('/api/schedules');
       this.batches = (await api('/api/samples/batches'))
         .map(b => {
           b.ok = (b.samples || []).filter(s => this.canPick(s)).length;
@@ -1433,24 +1443,77 @@ const ScheduleView = {
         })
         .filter(b => b.ok > 0);
       this.curBatchId = this.batches.length ? this.batches[0].id : null;
-      this.form = { sample_ids: [], plan_start: '', plan_end: '' };
+      this.form = { sample_ids: [], equipment_id: null, plan_start: '', plan_end: '' };
+      this.lastStart = '';
+      this.lastEnd = '';
       this.showModal = true;
     },
     canPick(s) { return !s.order_id && ['已接收','已排期','实验中','已完成'].includes(s.status) && !this.scheduledFor(s); },
     scheduledFor(s) { return !!(this.detail && this.detail.schedules && this.detail.schedules.some(sc => sc.sample_id === s.id)); },
     curSamples() { return this.curBatch ? [...this.curBatch.samples].sort((a, b) => (this.canPick(a) === this.canPick(b)) ? 0 : (this.canPick(a) ? -1 : 1)) : []; },
+    overlapBusy(start, end) {
+      if (!this.form.equipment_id || !start || !end) return null;
+      const ns = new Date(start), ne = new Date(end);
+      if (!(ne > ns)) return null;
+      return this.busyRanges.find(r => new Date(r.end) > ns && new Date(r.start) < ne) || null;
+    },
+    onDeviceChange() {
+      this.form.plan_start = '';
+      this.form.plan_end = '';
+      this.lastStart = '';
+      this.lastEnd = '';
+    },
+    onStartChange() {
+      if (this.overlapBusy(this.form.plan_start, this.form.plan_end)) {
+        toast('该开始时间与设备已占用时段冲突，已回退', 'error');
+        this.form.plan_start = this.lastStart;
+      } else {
+        this.lastStart = this.form.plan_start;
+      }
+    },
+    onEndChange() {
+      if (this.overlapBusy(this.form.plan_start, this.form.plan_end)) {
+        toast('该完成时间与设备已占用时段冲突，已回退', 'error');
+        this.form.plan_end = this.lastEnd;
+      } else {
+        this.lastEnd = this.form.plan_end;
+      }
+    },
+    ganttStyle(r) {
+      const rs = this.busyRanges;
+      if (!rs.length) return { left: '0%', width: '100%' };
+      let t0 = new Date(rs[0].start).getTime(), t1 = new Date(rs[0].end).getTime();
+      for (const x of rs) {
+        t0 = Math.min(t0, new Date(x.start).getTime());
+        t1 = Math.max(t1, new Date(x.end).getTime());
+      }
+      const span = (t1 - t0) || 1;
+      const s = new Date(r.start).getTime(), e = new Date(r.end).getTime();
+      return { left: ((s - t0) / span * 100) + '%', width: Math.max((e - s) / span * 100, 1) + '%' };
+    },
+    ganttLabel() {
+      const rs = this.busyRanges;
+      if (!rs.length) return { start: '', end: '' };
+      let minS = rs[0].start, maxE = rs[0].end;
+      for (const r of rs) {
+        if (new Date(r.start) < new Date(minS)) minS = r.start;
+        if (new Date(r.end) > new Date(maxE)) maxE = r.end;
+      }
+      return { start: fmtDT(minS), end: fmtDT(maxE) };
+    },
     async addSchedule() {
       try {
         if (!this.form.sample_ids.length) { toast('请选择样品', 'error'); return; }
         if (!this.form.plan_start) { toast('预计开始时间必填', 'error'); return; }
         if (!this.form.plan_end) { toast('预计完成时间必填', 'error'); return; }
         if (new Date(this.form.plan_end) <= new Date(this.form.plan_start)) { toast('预计完成时间必须晚于预计开始时间', 'error'); return; }
+        if (this.conflict) { toast('所选时间与设备已占用时段冲突，请调整', 'error'); return; }
         const remain = this.needCount - this.scheduledCount;
         if (this.form.sample_ids.length > remain) { toast('已选 ' + this.form.sample_ids.length + ' 台，但还可再排 ' + remain + ' 条', 'error'); return; }
         const ok = [], fail = [];
         for (const sid of this.form.sample_ids) {
           try {
-            await api('/api/schedules', 'POST', { sample_id: sid, order_id: this.cur.id, plan_start: this.form.plan_start, plan_end: this.form.plan_end });
+            await api('/api/schedules', 'POST', { sample_id: sid, order_id: this.cur.id, equipment_id: this.form.equipment_id || null, plan_start: this.form.plan_start, plan_end: this.form.plan_end });
             ok.push(sid);
           } catch (e) {
             fail.push(e.message);
@@ -1546,29 +1609,50 @@ const ScheduleView = {
 
       <div style="background:#f7f9fc;padding:12px;border-radius:6px;margin-top:12px">
         <div class="form-row" style="margin:0 0 10px">
+          <div class="form-group" style="margin:0;min-width:240px">
+            <label>设备</label>
+            <select v-model="form.equipment_id" @change="onDeviceChange" style="max-width:260px">
+              <option :value="null">未指定（可在「实验开始」时选择）</option>
+              <option v-for="e in eq" :value="e.id" :disabled="['停用','报废'].includes(e.status)">{{e.name}}（{{e.exp_type}}）</option>
+            </select>
+          </div>
+        </div>
+        <div v-if="busyRanges.length" style="margin:0 0 10px;padding:8px 10px;background:#fff7f7;border:1px solid #f5c6cb;border-radius:4px">
+          <div style="font-size:12px;color:#c62828;font-weight:600;margin-bottom:6px">该设备已排期占用（甘特图）</div>
+          <div v-for="(r,i) in busyRanges" :key="i" style="display:flex;align-items:center;margin-bottom:5px;font-size:12px">
+            <div style="width:130px;flex:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#5a5a5a" :title="r.order_no">{{r.order_no}}<span v-if="r.sample_no" style="color:var(--muted);font-size:11px"> · {{r.sample_no}}</span></div>
+            <div style="flex:1;position:relative;height:18px;background:#f1f3f5;border-radius:3px;overflow:hidden">
+              <div :style="ganttStyle(r)" :title="fmtDT(r.start) + ' ~ ' + fmtDT(r.end)" style="position:absolute;top:0;bottom:0;background:#e05555;border-radius:3px"></div>
+            </div>
+            <div style="width:150px;flex:none;text-align:right;color:var(--muted);font-size:11px">{{fmtDT(r.start)}} ~ {{fmtDT(r.end)}}</div>
+          </div>
+          <div style="font-size:11px;color:var(--muted)">时间轴：{{ganttLabel.start}} ── {{ganttLabel.end}}</div>
+        </div>
+        <div class="form-row" style="margin:0 0 4px">
           <div class="form-group" style="margin:0">
             <label>预计开始时间 <span class="req">*</span></label>
-            <input type="datetime-local" v-model="form.plan_start" style="max-width:260px">
+            <input type="datetime-local" v-model="form.plan_start" @change="onStartChange" :style="conflict ? 'max-width:260px;border-color:#c62828' : 'max-width:260px'">
           </div>
           <div class="form-group" style="margin:0">
             <label>预计完成时间 <span class="req">*</span></label>
-            <input type="datetime-local" v-model="form.plan_end" :min="form.plan_start" style="max-width:260px">
+            <input type="datetime-local" v-model="form.plan_end" @change="onEndChange" :min="form.plan_start" :style="conflict ? 'max-width:260px;border-color:#c62828' : 'max-width:260px'">
           </div>
         </div>
+        <div v-if="conflict" style="margin:0 0 10px;color:#c62828;font-size:12px">所选时间与设备已占用时段冲突，请调整开始/完成时间。</div>
         <div class="form-row" style="margin:0">
-          <div style="color:var(--muted);font-size:12px;flex:1;align-self:center">实验员、设备、实验用时、过渡用时，请在「实验开始」模块中填写。</div>
-          <button class="btn primary" :disabled="full" @click="addSchedule">生成排期计划</button>
+          <div style="color:var(--muted);font-size:12px;flex:1;align-self:center">设备选填，选了设备会校验占用冲突；实验员、实验用时、过渡用时，请在「实验开始」模块中填写。</div>
+          <button class="btn primary" :disabled="full || conflict" @click="addSchedule">生成排期计划</button>
         </div>
       </div>
 
       <div style="font-weight:600;margin:14px 0 6px">已生成排期计划</div>
-      <table class="tbl"><thead><tr><th>SN</th><th>样品编号</th><th>预计开始</th><th>预计完成</th><th>状态</th><th>操作</th></tr></thead>
+      <table class="tbl"><thead><tr><th>SN</th><th>样品编号</th><th>设备</th><th>预计开始</th><th>预计完成</th><th>状态</th><th>操作</th></tr></thead>
       <tbody>
         <tr v-for="s in detail.schedules" :key="s.id">
-          <td>{{s.sn||'-'}}</td><td>{{s.sample_no}}</td><td>{{fmtDT(s.plan_start)}}</td><td>{{fmtDT(s.plan_end)}}</td><td v-html="badge(s.status)"></td>
+          <td>{{s.sn||'-'}}</td><td>{{s.sample_no}}</td><td>{{s.equipment_name||'-'}}</td><td>{{fmtDT(s.plan_start)}}</td><td>{{fmtDT(s.plan_end)}}</td><td v-html="badge(s.status)"></td>
           <td><button class="btn link sm" v-if="s.status==='已排期'" @click="removeSchedule(s)">删除</button></td>
         </tr>
-        <tr v-if="!detail.schedules.length"><td colspan="6" class="empty">暂无排期计划，请在上方选择样品后生成</td></tr>
+        <tr v-if="!detail.schedules.length"><td colspan="7" class="empty">暂无排期计划，请在上方选择样品后生成</td></tr>
       </tbody></table>
       <div class="modal-actions"><button class="btn" @click="showModal=false">关闭</button></div>
     </div>
@@ -1586,10 +1670,12 @@ const ExperimentStartView = {
     },
     async open(o) { this.cur = o; this.detail = await api('/api/orders/' + o.id); this.showModal = true; },
     openStart() {
-      // 整单开始：实验员默认带出审核时指定的实验员，其余字段留待统一填写
+      // 整单开始：实验员默认带出审核时指定的实验员；设备默认带出排期计划的设备（多条一致时）
+      const pending = (this.detail.schedules || []).filter(s => s.status === '已排期');
+      const eqIds = [...new Set(pending.map(s => s.equipment_id).filter(v => v != null))];
       this.startForm = {
         experimenter_id: this.detail.reviewer_id || null,
-        equipment_id: null,
+        equipment_id: eqIds.length === 1 ? eqIds[0] : null,
         experiment_hours: 4,
         transition_hours: 0,
       };
@@ -1614,12 +1700,16 @@ const ExperimentStartView = {
   template: `
   <div class="card">
     <h3>实验开始</h3>
-    <table class="tbl"><thead><tr><th>实验编号</th><th>委托单位</th><th>检测项目</th><th>状态</th><th>操作</th></tr></thead>
+    <table class="tbl"><thead><tr><th>实验编号</th><th>委托单位</th><th>委托人</th><th>DHD型号</th><th>检测项目</th><th>状态</th><th>实验员</th><th>预计开始时间</th><th>预计完成时间</th><th>操作</th></tr></thead>
     <tbody>
       <template v-for="o in orders" :key="o.id">
         <tr v-if="['已排期'].includes(o.status)">
-          <td>{{o.experiment_no||o.order_no}}</td><td>{{o.entrust_org}}</td><td>{{o.test_item}}</td>
-          <td v-html="badge(o.status)"></td><td><button class="btn primary sm" @click="open(o)">开始实验</button></td>
+          <td>{{o.experiment_no||o.order_no}}</td><td>{{o.entrust_org}}</td><td>{{o.entruster||'-'}}</td><td>{{o.sample_model||'-'}}</td><td>{{o.test_item}}</td>
+          <td v-html="badge(o.status)"></td>
+          <td>{{o.reviewer_name||'-'}}</td>
+          <td>{{o.plan_start_min ? fmtDT(o.plan_start_min) : '-'}}</td>
+          <td>{{o.plan_end_max ? fmtDT(o.plan_end_max) : '-'}}</td>
+          <td><button class="btn primary sm" @click="open(o)">开始实验</button></td>
         </tr>
       </template>
     </tbody></table>
@@ -1685,12 +1775,17 @@ const ExperimentEndView = {
   template: `
   <div class="card">
     <h3>实验结束</h3>
-    <table class="tbl"><thead><tr><th>实验编号</th><th>委托单位</th><th>检测项目</th><th>状态</th><th>操作</th></tr></thead>
+    <table class="tbl"><thead><tr><th>实验编号</th><th>委托单位</th><th>委托人</th><th>DHD型号</th><th>检测项目</th><th>状态</th><th>实验员</th><th>预计开始时间</th><th>预计完成时间</th><th>实际开始时间</th><th>操作</th></tr></thead>
     <tbody>
       <template v-for="o in orders" :key="o.id">
         <tr v-if="['实验中'].includes(o.status)">
-          <td>{{o.experiment_no||o.order_no}}</td><td>{{o.entrust_org}}</td><td>{{o.test_item}}</td>
-          <td v-html="badge(o.status)"></td><td><button class="btn primary sm" @click="open(o)">结束实验</button></td>
+          <td>{{o.experiment_no||o.order_no}}</td><td>{{o.entrust_org}}</td><td>{{o.entruster||'-'}}</td><td>{{o.sample_model||'-'}}</td><td>{{o.test_item}}</td>
+          <td v-html="badge(o.status)"></td>
+          <td>{{o.experimenter_name||'-'}}</td>
+          <td>{{o.plan_start_min ? fmtDT(o.plan_start_min) : '-'}}</td>
+          <td>{{o.plan_end_max ? fmtDT(o.plan_end_max) : '-'}}</td>
+          <td>{{o.actual_start_min ? fmtDT(o.actual_start_min) : '-'}}</td>
+          <td><button class="btn primary sm" @click="open(o)">结束实验</button></td>
         </tr>
       </template>
     </tbody></table>

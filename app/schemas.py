@@ -161,7 +161,7 @@ class ScheduleOut(BaseModel):
     order_id: int
     sample_id: int
     sample_no: str = ""
-    equipment_id: int
+    equipment_id: int | None = None
     equipment_name: str = ""
     experiment_hours: float
     transition_hours: float
@@ -298,9 +298,10 @@ class SampleBatchConfirmRequest(BaseModel):
 # 排期
 # ---------------------------------------------------------------------------
 class ScheduleCreate(BaseModel):
-    """排期仅做「委托单 + 样品」分配；预计开始/完成时间在排期时填写，其余在「实验开始」时填写。"""
+    """排期：委托单 + 样品 +（可选）设备；预计开始/完成时间在排期时填写，其余在「实验开始」时填写。"""
     sample_id: int
     order_id: int | None = None     # 池样品排期时指定目标委托单
+    equipment_id: int | None = None  # 设备（选填；填写后参与设备占用冲突校验）
     plan_start: datetime | None = None   # 预计开始时间（必填）
     plan_end: datetime | None = None     # 预计完成时间（必填）
 
