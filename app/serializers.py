@@ -157,6 +157,8 @@ def report_to_dict(r) -> dict:
         "report_type": r.report_type, "version": r.version, "status": r.status,
         "has_docx": bool(r.docx_content),
         "issuer_id": r.issuer_id, "issuer_name": r.issuer.name if r.issuer else "",
+        "approver_id": r.approver_id, "approver_name": r.approver.name if r.approver else "",
+        "approved_at": _dt(r.approved_at), "reject_reason": r.reject_reason, "rejected_at": _dt(r.rejected_at),
         "issued_at": _dt(r.issued_at), "created_at": _dt(r.created_at),
         "order_no": r.order.order_no if r.order else "",
         "experiment_no": r.order.experiment_no if r.order else "",

@@ -6,6 +6,7 @@ import os
 import re
 import uuid
 import zipfile
+from datetime import datetime
 from html.parser import HTMLParser
 from pathlib import Path
 
@@ -19,9 +20,9 @@ from .. import onlyoffice
 from ..database import get_db
 from ..deps import require_roles
 from ..models import EntrustOrder, Report, ReportDraft, ReportTemplate, Schedule, User
-from ..notify import notify_entruster
+from ..notify import notify, notify_entruster
 from ..numbering import next_report_no, retry_on_number_conflict
-from ..schemas import ReportDraftRequest, ReportIssueRequest
+from ..schemas import ReportDraftRequest, ReportIssueRequest, ReportRejectRequest
 from ..serializers import report_to_dict
 
 router = APIRouter(prefix="/api/reports", tags=["reports"])
@@ -886,6 +887,7 @@ def save_report_docx(db: Session, order_id: int, report_type: str, version: str,
     draft = _load_draft(db, order_id, report_type, version)
     if draft:
         draft.docx_content = docx_bytes
+        draft.updated_at = datetime.now()
     else:
         draft = ReportDraft(order_id=order_id, report_type=report_type, version=version, content="", docx_content=docx_bytes)
         db.add(draft)
@@ -1247,6 +1249,7 @@ def word_sync(
     draft = _load_draft(db, order_id, report_type, version)
     if draft:
         draft.content = content
+        draft.updated_at = datetime.now()
     else:
         draft = ReportDraft(order_id=order_id, report_type=report_type, version=version, content=content)
         db.add(draft)
@@ -1257,9 +1260,23 @@ def word_sync(
 
 @router.get("/drafts")
 def list_drafts(db: Session = Depends(get_db), _: User = Depends(require_roles("admin", "experimenter"))):
-    """列出所有草稿（供前端「生成报告」按钮门控使用）。"""
+    """列出所有草稿（供前端「生成报告」按钮门控使用，含 updated_at 用于驳回后重新点亮判定）。"""
     rows = db.query(ReportDraft).order_by(ReportDraft.id.desc()).all()
-    return [{"order_id": d.order_id, "report_type": d.report_type, "version": d.version} for d in rows]
+    return [{
+        "order_id": d.order_id, "report_type": d.report_type, "version": d.version,
+        "updated_at": d.updated_at.isoformat() if d.updated_at else None,
+    } for d in rows]
+
+
+@router.get("/states")
+def report_states(db: Session = Depends(get_db), _: User = Depends(require_roles("admin", "experimenter"))):
+    """列出各报告的审批状态（供前端「生成报告」点亮/置灰判定）。"""
+    rows = db.query(Report).filter(Report.status.in_(["待审批", "已驳回", "已签发"])).all()
+    return [{
+        "order_id": r.order_id, "report_type": r.report_type, "version": r.version,
+        "status": r.status,
+        "rejected_at": r.rejected_at.isoformat() if r.rejected_at else None,
+    } for r in rows]
 
 
 @router.post("/draft")
@@ -1278,6 +1295,9 @@ def save_draft(
     draft = _load_draft(db, data.order_id, report_type, version)
     if draft:
         draft.content = content
+        # 显式刷新 updated_at：SQLAlchemy 的 onupdate 在 content 未变化时不会触发 UPDATE，
+        # 而「否决后重新保存」需要 updated_at > rejected_at 才能重新点亮提交按钮。
+        draft.updated_at = datetime.now()
     else:
         draft = ReportDraft(order_id=data.order_id, report_type=report_type, version=version, content=content)
         db.add(draft)
@@ -1289,6 +1309,21 @@ def save_draft(
 # ---------------------------------------------------------------------------
 # 报告签发与归档
 # ---------------------------------------------------------------------------
+def _inject_approver_name(content: str, name: str) -> str:
+    """把审批人姓名写入报告正文「审核」位置：常规版「审核：」、检测版「审核人」单元格；
+    其余类型（委托记录单/自定义）无该位置，仅在归档信息里记录审批人。"""
+    if not name:
+        return content or ""
+    content = content or ""
+    escaped = _html.escape(name)
+    if "审核：" in content:
+        return content.replace("审核：", f"审核：{escaped}", 1)
+    m = re.search(r"(<td[^>]*>\s*审核人\s*</td>\s*<td[^>]*>)[^<]*(</td>)", content)
+    if m:
+        return content[: m.start()] + m.group(1) + escaped + m.group(2) + content[m.end():]
+    return content
+
+
 @router.post("/{order_id}/issue")
 def issue_report(
     order_id: int,
@@ -1296,58 +1331,145 @@ def issue_report(
     db: Session = Depends(get_db),
     user: User = Depends(require_roles("admin", "experimenter")),
 ):
+    """提交报告审批：把草稿快照生成 Report（状态「待审批」），等待管理员审批通过后归档。"""
     o = db.get(EntrustOrder, order_id)
     if o is None:
         raise HTTPException(404, "委托单不存在")
     if data.report_type in ("检测报告", "自定义报告") and o.status != "已完成":
-        raise HTTPException(400, "实验未完成，暂不能签发检测报告")
-    version = "" if data.report_type == "委托记录单" else data.version
-    # 若存在草稿，签发时把编辑后的正文快照写入报告
+        raise HTTPException(400, "实验未完成，暂不能提交检测报告")
+    # version 与草稿保持一致（检测报告默认「常规」，委托记录单固定空），避免草稿与 Report 版本错位
+    _, version = _normalize_type_version(data.report_type, data.version)
     draft = _load_draft(db, order_id, data.report_type, data.version)
-    content = draft.content if draft and draft.content else ""
-    docx_content = draft.docx_content if draft and draft.docx_content else None
+    if not draft or not (draft.content or draft.docx_content):
+        raise HTTPException(400, "请先编辑并保存该类型报告草稿")
+    content = draft.content or ""
+    docx_content = draft.docx_content or None
+
     existing = (
         db.query(Report)
         .filter(
             Report.order_id == order_id,
             Report.report_type == data.report_type,
             Report.version == version,
-            Report.status != "已作废",
         )
         .first()
     )
     if existing:
-        changed = False
-        if content and existing.content != content:
-            existing.content = content
-            changed = True
-        if docx_content and existing.docx_content != docx_content:
-            existing.docx_content = docx_content
-            changed = True
-        if changed:
-            db.commit()
-        if draft:
-            db.delete(draft)
-            db.commit()
+        if existing.status == "待审批":
+            raise HTTPException(400, "该报告已在审批中，请勿重复提交")
+        if existing.status == "已签发":
+            raise HTTPException(400, "该报告已签发归档，不能重复提交")
+        # 已驳回：需在否决后重新保存过草稿才可重提（前端已门控，后端兜底校验）
+        if existing.status == "已驳回" and draft.updated_at and existing.rejected_at and draft.updated_at <= existing.rejected_at:
+            raise HTTPException(400, "请重新编辑并保存草稿后再提交")
+        existing.status = "待审批"
+        existing.content = content
+        existing.docx_content = docx_content
+        existing.issuer_id = user.id
+        existing.reject_reason = ""
+        existing.rejected_at = None
+        existing.approver_id = None
+        existing.approved_at = None
+        log(db, user, "重新提交报告审批", "report", existing.id, f"{o.experiment_no or o.order_no} {data.report_type}{version}")
+        db.commit()
         return report_to_dict(existing)
 
     def _do():
         r = Report(
             order_id=order_id, report_no=next_report_no(db),
-            report_type=data.report_type, version=version, status="已签发",
+            report_type=data.report_type, version=version, status="待审批",
             content=content, docx_content=docx_content, issuer_id=user.id,
         )
         db.add(r)
-        log(db, user, "签发报告", "report", None, f"{o.experiment_no or o.order_no} {data.report_type}")
-        notify_entruster(db, o, "报告已签发", f"{o.experiment_no or o.order_no} {o.sample_name} 的{data.report_type}已签发")
+        db.flush()
+        log(db, user, "提交报告审批", "report", r.id, f"{o.experiment_no or o.order_no} {data.report_type}{version}")
+        notify(db, "新报告待审批", f"{o.experiment_no or o.order_no} {o.sample_name} 的{data.report_type}待审批", role="admin", order_id=o.id)
         return r
 
     r = retry_on_number_conflict(db, _do)
-    if draft:
-        db.delete(draft)
-        db.commit()
     db.refresh(r)
     return report_to_dict(r)
+
+
+# ---------------------------------------------------------------------------
+# 报告审批（管理员）
+# ---------------------------------------------------------------------------
+@router.get("/pending")
+def pending_reports(db: Session = Depends(get_db), _: User = Depends(require_roles("admin"))):
+    """列出待审批报告（仅管理员）。"""
+    rows = (
+        db.query(Report)
+        .options(selectinload(Report.order), selectinload(Report.issuer), selectinload(Report.approver))
+        .filter(Report.status == "待审批")
+        .order_by(Report.id.desc())
+        .all()
+    )
+    return [report_to_dict(r) for r in rows]
+
+
+@router.get("/pending/{report_id}/view", response_class=Response)
+def pending_view(report_id: int, db: Session = Depends(get_db), _: User = Depends(require_roles("admin"))):
+    """预览待审批报告正文（管理员审批前查看）。"""
+    r = db.get(Report, report_id)
+    if r is None:
+        raise HTTPException(404, "报告不存在")
+    o = _load_order_full(db, r.order_id)
+    if r.content:
+        html = _wrap_report(r.content, f"报告 {r.report_no}")
+    else:
+        html = render_entrust_html(o) if r.report_type == "委托记录单" else render_test_html(o, r.version or "常规")
+    return Response(html, media_type="text/html")
+
+
+@router.post("/{report_id}/approve")
+def approve_report(report_id: int, db: Session = Depends(get_db), user: User = Depends(require_roles("admin"))):
+    """审批通过：写入审批人姓名到「审核」位置，状态→已签发并归档。"""
+    r = db.get(Report, report_id)
+    if r is None:
+        raise HTTPException(404, "报告不存在")
+    if r.status != "待审批":
+        raise HTTPException(400, "该报告不在待审批状态")
+    o = _load_order_full(db, r.order_id)
+    content = r.content or _body_for(db, o, r.report_type, r.version)
+    r.content = _inject_approver_name(content, user.name)
+    r.status = "已签发"
+    r.approver_id = user.id
+    r.approved_at = datetime.now()
+    r.issued_at = datetime.now()
+    r.reject_reason = ""
+    log(db, user, "报告审批通过", "report", r.id, f"{r.report_no} {r.report_type}{r.version}")
+    msg = f"{o.experiment_no or o.order_no} {o.sample_name} 的{r.report_type}已通过审批并归档"
+    if r.issuer_id:
+        notify(db, "报告审批通过", msg, user=r.issuer, order_id=r.order_id)
+    else:
+        notify(db, "报告审批通过", msg, role="experimenter", order_id=r.order_id)
+    db.commit()
+    return report_to_dict(r)
+
+
+@router.post("/{report_id}/reject")
+def reject_report(report_id: int, data: ReportRejectRequest, db: Session = Depends(get_db), user: User = Depends(require_roles("admin"))):
+    """审批否决：必填原因，状态→已驳回（回到「实验报告」，生成报告置灰直至重新编辑保存）。"""
+    r = db.get(Report, report_id)
+    if r is None:
+        raise HTTPException(404, "报告不存在")
+    if r.status != "待审批":
+        raise HTTPException(400, "该报告不在待审批状态")
+    reason = (data.reject_reason or "").strip()
+    if not reason:
+        raise HTTPException(400, "否决时必须填写否决原因")
+    r.status = "已驳回"
+    r.reject_reason = reason
+    r.rejected_at = datetime.now()
+    log(db, user, "报告审批否决", "report", r.id, f"{r.report_no} 原因：{reason}")
+    o = _load_order_full(db, r.order_id)
+    msg = f"{o.experiment_no or o.order_no} {o.sample_name} 的{r.report_type}被否决：{reason}"
+    if r.issuer_id:
+        notify(db, "报告被否决", msg, user=r.issuer, order_id=r.order_id)
+    else:
+        notify(db, "报告被否决", msg, role="experimenter", order_id=r.order_id)
+    db.commit()
+    return {"message": "已否决", "status": "已驳回"}
 
 
 @router.get("/archive")
@@ -1361,8 +1483,9 @@ def archive(
 ):
     q = (
         db.query(Report)
-        .options(selectinload(Report.order), selectinload(Report.issuer))
+        .options(selectinload(Report.order), selectinload(Report.issuer), selectinload(Report.approver))
         .join(EntrustOrder, Report.order_id == EntrustOrder.id)
+        .filter(Report.status == "已签发")
     )
     if type:
         q = q.filter(Report.report_type == type)

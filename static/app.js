@@ -13,8 +13,8 @@ const state = reactive({
 
 /* ---------------- 角色权限与默认首页 ---------------- */
 const ROLE_ROUTES = {
-  admin: ['/dashboard', '/orders/new', '/orders/query', '/review', '/samples', '/schedule', '/expstart', '/expend', '/reports', '/equipment', '/boards', '/handover', '/statistics', '/customers', '/audit', '/users', '/cases'],
-  experimenter: ['/dashboard', '/orders/query', '/review', '/samples', '/schedule', '/expstart', '/expend', '/reports', '/boards', '/handover', '/statistics', '/customers', '/cases'],
+  admin: ['/dashboard', '/orders/new', '/orders/query', '/review', '/samples', '/schedule', '/expstart', '/expend', '/reports', '/reports/approval', '/reports/archive', '/equipment', '/boards', '/handover', '/statistics', '/customers', '/audit', '/users', '/cases'],
+  experimenter: ['/dashboard', '/orders/query', '/review', '/samples', '/schedule', '/expstart', '/expend', '/reports', '/reports/archive', '/boards', '/handover', '/statistics', '/customers', '/cases'],
   entruster: ['/orders/new', '/orders/query', '/cases'],
 };
 function homeRoute(role) { return role === 'entruster' ? '/orders/query' : '/dashboard'; }
@@ -80,6 +80,7 @@ function escHtml(s) {
 
 const ORDER_STATUS = {
   '待审核': 'gray', '已审核': 'blue', '已排期': 'purple', '实验中': 'orange', '已完成': 'green', '已否决': 'red',
+  '待审批': 'orange', '已驳回': 'red', '已签发': 'green',
 };
 const SAMPLE_STATUS = {
   '待接收': 'gray', '已接收': 'blue', '已排期': 'purple', '实验中': 'orange', '已完成': 'green',
@@ -155,7 +156,7 @@ const MainLayout = {
             { r: '/orders/new', t: '委托申请' }, { r: '/orders/query', t: '委托查询' }, { r: '/review', t: '委托审核' }, { r: '/cases', t: '测试用例库' }] },
           { group: '实验管理', links: [
             { r: '/samples', t: '样品管理' }, { r: '/schedule', t: '实验排期' }, { r: '/expstart', t: '实验开始' }, { r: '/expend', t: '实验结束' }] },
-          { group: '报告', links: [{ r: '/reports', t: '实验报告' }] },
+          { group: '报告', links: [{ r: '/reports', t: '实验报告' }, { r: '/reports/approval', t: '报告审批' }, { r: '/reports/archive', t: '归档报告' }] },
           { group: '统计', links: [{ r: '/statistics', t: '统计图表' }] },
           { group: '资源', links: [
             { r: '/equipment', t: '设备管理' }, { r: '/boards', t: '展板' }, { r: '/handover', t: '交接班' }, { r: '/customers', t: '客户档案' }] },
@@ -167,7 +168,7 @@ const MainLayout = {
             { r: '/orders/query', t: '委托查询' }, { r: '/review', t: '委托审核' }, { r: '/cases', t: '测试用例库' }] },
           { group: '实验管理', links: [
             { r: '/samples', t: '样品管理' }, { r: '/schedule', t: '实验排期' }, { r: '/expstart', t: '实验开始' }, { r: '/expend', t: '实验结束' }] },
-          { group: '报告', links: [{ r: '/reports', t: '实验报告' }] },
+          { group: '报告', links: [{ r: '/reports', t: '实验报告' }, { r: '/reports/archive', t: '归档报告' }] },
           { group: '统计', links: [{ r: '/statistics', t: '统计图表' }] },
           { group: '资源', links: [{ r: '/boards', t: '展板' }, { r: '/handover', t: '交接班' }, { r: '/customers', t: '客户档案' }] },
         ],
@@ -180,7 +181,7 @@ const MainLayout = {
     title() {
       const m = {
         '/dashboard': '工作台', '/orders/new': '委托申请', '/orders/query': '委托查询', '/review': '委托审核',
-        '/samples': '样品管理', '/schedule': '实验排期', '/expstart': '实验开始', '/expend': '实验结束', '/reports': '实验报告',
+        '/samples': '样品管理', '/schedule': '实验排期', '/expstart': '实验开始', '/expend': '实验结束', '/reports': '实验报告', '/reports/approval': '报告审批', '/reports/archive': '归档报告',
         '/equipment': '设备管理', '/boards': '展板', '/handover': '交接班', '/statistics': '统计图表',
         '/customers': '客户档案', '/audit': '审计日志', '/users': '用户管理', '/cases': '测试用例库',
       };
@@ -251,6 +252,8 @@ const MainLayout = {
         <exp-start-view v-else-if="state.route==='/expstart'"></exp-start-view>
         <exp-end-view v-else-if="state.route==='/expend'"></exp-end-view>
         <reports-view v-else-if="state.route==='/reports'"></reports-view>
+        <report-approval v-else-if="state.route==='/reports/approval'"></report-approval>
+        <report-archive v-else-if="state.route==='/reports/archive'"></report-archive>
         <equipment-view v-else-if="state.route==='/equipment'"></equipment-view>
         <boards-view v-else-if="state.route==='/boards'"></boards-view>
         <handover-view v-else-if="state.route==='/handover'"></handover-view>
@@ -1829,19 +1832,17 @@ const ExperimentEndView = {
 
 /* ---------------- 实验报告 ---------------- */
 const ReportsView = {
-  data: () => ({ orders: [], cur: null, detail: null, showModal: false, tab: 'gen', archives: [], archType: '', archKeyword: '', drafts: {}, editChoose: false, editShow: false, editType: '', editVersion: '', editHtml: '', editSaving: false, templates: [], tplPick: false, tplSel: '', tplName: '', tplFile: null, ooEnabled: false, ooUrl: '', ooShow: false, ooEditor: null }),
+  data: () => ({ orders: [], cur: null, detail: null, showModal: false, tab: 'gen', drafts: {}, states: {}, editChoose: false, editShow: false, editType: '', editVersion: '', editHtml: '', editSaving: false, templates: [], tplPick: false, tplSel: '', tplName: '', tplFile: null, ooEnabled: false, ooUrl: '', ooShow: false, ooEditor: null }),
   methods: {
-    async load() { this.orders = await api('/api/orders?status='); this.loadDrafts(); },
+    async load() { const q = state.role === 'experimenter' ? '&mine=1' : ''; this.orders = await api('/api/orders?status=' + q); this.loadDrafts(); },
     async loadDrafts() {
-      const rows = await api('/api/reports/drafts');
+      const [rows, states] = await Promise.all([api('/api/reports/drafts'), api('/api/reports/states')]);
       this.drafts = {};
-      rows.forEach(d => { const m = this.drafts[d.order_id] || (this.drafts[d.order_id] = {}); m[d.report_type + '|' + d.version] = true; });
+      rows.forEach(d => { const m = this.drafts[d.order_id] || (this.drafts[d.order_id] = {}); m[d.report_type + '|' + d.version] = { updated_at: d.updated_at }; });
+      this.states = {};
+      states.forEach(s => { this.states[s.order_id + '|' + s.report_type + '|' + s.version] = s; });
     },
-    async loadArchive() {
-      const q = (this.archType ? 'type=' + encodeURIComponent(this.archType) : '') + (this.archKeyword ? (this.archType ? '&' : '') + 'keyword=' + encodeURIComponent(this.archKeyword) : '');
-      this.archives = await api('/api/reports/archive' + (q ? '?' + q : ''));
-    },
-    switchTab(t) { this.tab = t; if (t === 'arch') this.loadArchive(); if (t === 'tpl') this.loadTemplates(); },
+    switchTab(t) { this.tab = t; if (t === 'tpl') this.loadTemplates(); },
     async open(o) { this.cur = o; this.detail = await api('/api/orders/' + o.id); this.showModal = true; },
     async report(kind, version) {
       // 先同步打开空窗口（避免被浏览器拦截弹窗），再带 token 拉取 HTML 写入
@@ -1853,34 +1854,22 @@ const ReportsView = {
         w.document.write(reportHtmlWithBase(html)); w.document.close();
       } catch (e) { w.close(); toast(e.message, 'error'); }
     },
-    async issue(report_type, version) {
-      try { await api('/api/reports/' + this.cur.id + '/issue', 'POST', { report_type, version: version || '' }); toast('已签发并留档', 'success'); }
+    async submit(report_type, version) {
+      try { await api('/api/reports/' + this.cur.id + '/issue', 'POST', { report_type, version: version || '' }); toast('已提交审批', 'success'); this.loadDrafts(); }
       catch (e) { toast(e.message, 'error'); }
     },
-    async viewArchive(r) {
-      const w = window.open('', '_blank');
-      if (!w) { toast('请允许浏览器弹出新窗口', 'error'); return; }
-      try {
-        const html = await api('/api/reports/archive/' + r.id + '/view');
-        w.document.write(reportHtmlWithBase(html)); w.document.close();
-      } catch (e) { w.close(); toast(e.message, 'error'); }
+    canSubmit(o, type, version) {
+      const m = this.drafts[o.id]; if (!m) return false;
+      const d = m[type + '|' + version]; if (!d) return false;
+      const st = this.states[o.id + '|' + type + '|' + version];
+      if (!st) return true;
+      if (st.status === '待审批' || st.status === '已签发') return false;
+      if (st.status === '已驳回') return !!(d.updated_at && st.rejected_at && d.updated_at > st.rejected_at);
+      return true;
     },
-    async delArchive(r) { if (confirm('确认作废报告 ' + r.report_no + '？')) { await api('/api/reports/archive/' + r.id, 'DELETE'); this.loadArchive(); } },
-    async downloadDocx(r) {
-      try {
-        const headers = {};
-        if (state.token) headers['Authorization'] = 'Bearer ' + state.token;
-        const res = await fetch('/api/reports/archive/' + r.id + '/docx', { headers });
-        if (res.status === 401) { logout(); throw new Error('未登录或登录已过期'); }
-        if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error((d && d.detail) || '下载失败'); }
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = (r.report_no || 'report') + '_' + r.report_type + '.docx';
-        document.body.appendChild(a); a.click(); a.remove();
-        setTimeout(() => URL.revokeObjectURL(url), 2000);
-      } catch (e) { toast(e.message, 'error'); }
+    canSubmitAny(o) {
+      const m = this.drafts[o.id]; if (!m) return false;
+      return Object.keys(m).some(k => { const i = k.indexOf('|'); return this.canSubmit(o, k.slice(0, i), k.slice(i + 1)); });
     },
     hasAnyDraft(o) { const m = this.drafts[o.id]; return !!(m && Object.keys(m).length); },
     hasDraftType(o, type, version) { const m = this.drafts[o.id]; return !!(m && m[type + '|' + version]); },
@@ -2005,7 +1994,6 @@ const ReportsView = {
   <div>
     <div class="tabs">
       <button class="tab" :class="{active:tab==='gen'}" @click="switchTab('gen')">生成报告</button>
-      <button class="tab" :class="{active:tab==='arch'}" @click="switchTab('arch')">归档列表</button>
       <button class="tab" :class="{active:tab==='tpl'}" @click="switchTab('tpl')">模板库</button>
     </div>
     <div class="card" v-if="tab==='gen'">
@@ -2015,23 +2003,9 @@ const ReportsView = {
         <template v-for="o in orders" :key="o.id">
           <tr v-if="o.status==='已完成'">
             <td><a class="link" @click="openEdit(o)">{{o.experiment_no||o.order_no}}</a></td><td>{{o.entrust_org}}</td><td>{{o.test_item}}</td>
-            <td v-html="badge(o.status)"></td><td><button class="btn primary sm" :disabled="!hasAnyDraft(o)" @click="open(o)">生成报告</button></td>
+            <td v-html="badge(o.status)"></td><td><button class="btn primary sm" :disabled="!canSubmitAny(o)" @click="open(o)">生成报告</button></td>
           </tr>
         </template>
-      </tbody></table>
-    </div>
-    <div class="card" v-if="tab==='arch'">
-      <div class="toolbar"><h3 style="flex:1">归档报告</h3>
-        <select v-model="archType" @change="loadArchive"><option value="">全部类型</option><option>委托记录单</option><option>检测报告</option></select>
-        <input v-model="archKeyword" placeholder="编号/样品/单位关键字" @keyup.enter="loadArchive"><button class="btn primary" @click="loadArchive">查询</button></div>
-      <table class="tbl"><thead><tr><th>报告编号</th><th>委托/实验编号</th><th>委托单位</th><th>类型</th><th>版本</th><th>状态</th><th>签发时间</th><th>操作</th></tr></thead>
-      <tbody>
-        <tr v-for="r in archives" :key="r.id">
-          <td>{{r.report_no}}</td><td>{{r.order_no}} / {{r.experiment_no||'-'}}</td><td>{{r.entrust_org}}</td><td>{{r.report_type}}</td><td>{{r.version||'-'}}</td>
-          <td v-html="badge(r.status)"></td><td>{{fmtDT(r.issued_at)}}</td>
-          <td><button class="btn link" @click="viewArchive(r)">查看</button><button class="btn link" v-if="r.has_docx" @click="downloadDocx(r)">下载Word</button><button class="btn link" v-if="state.role==='admin'" @click="delArchive(r)">作废</button></td>
-        </tr>
-        <tr v-if="!archives.length"><td colspan="8" class="empty">暂无归档报告</td></tr>
       </tbody></table>
     </div>
     <div class="card" v-if="tab==='tpl'">
@@ -2071,16 +2045,16 @@ const ReportsView = {
             <div v-for="tn in customDrafts(cur)" :key="tn" class="form-row" style="margin-bottom:8px">
               <span style="flex:1;line-height:32px">{{tn}}</span>
               <button class="btn" style="flex:1" @click="report('custom', tn)">生成(打印)</button>
-              <button class="btn" style="flex:1" @click="issue('自定义报告', tn)">签发</button>
+              <button class="btn" style="flex:1" :disabled="!canSubmit(cur,'自定义报告',tn)" @click="submit('自定义报告', tn)">提交审批</button>
             </div>
           </div>
         </template>
         <div style="border-top:1px dashed #e2e8f0;margin:16px 0;padding-top:14px">
-          <h4 style="margin-bottom:10px">签发并留档</h4>
+          <h4 style="margin-bottom:10px">提交审批（进入报告审批）</h4>
           <div class="form-row">
-            <button class="btn" style="flex:1" @click="issue('委托记录单','')">签发委托记录单</button>
-            <button class="btn" style="flex:1" :disabled="detail.status!=='已完成'" @click="issue('检测报告','常规')">签发检测报告(常规)</button>
-            <button class="btn" style="flex:1" :disabled="detail.status!=='已完成'" @click="issue('检测报告','检测')">签发检测报告(检测)</button>
+            <button class="btn" style="flex:1" :disabled="!canSubmit(cur,'委托记录单','')" @click="submit('委托记录单','')">提交委托记录单</button>
+            <button class="btn" style="flex:1" :disabled="detail.status!=='已完成' || !canSubmit(cur,'检测报告','常规')" @click="submit('检测报告','常规')">提交检测报告(常规)</button>
+            <button class="btn" style="flex:1" :disabled="detail.status!=='已完成' || !canSubmit(cur,'检测报告','检测')" @click="submit('检测报告','检测')">提交检测报告(检测)</button>
           </div>
         </div>
         <div class="modal-actions"><button class="btn" @click="showModal=false">关闭</button></div>
@@ -2137,6 +2111,108 @@ const ReportsView = {
         <div id="onlyoffice-editor" class="oo-editor-host"></div>
       </div>
     </div>
+  </div>`,
+};
+
+/* ---------------- 报告审批（管理员） ---------------- */
+const ReportApprovalView = {
+  data: () => ({ pendings: [], rejectShow: false, rejectTarget: null, rejectReason: '' }),
+  methods: {
+    async load() { this.pendings = await api('/api/reports/pending'); },
+    async view(r) {
+      const w = window.open('', '_blank');
+      if (!w) { toast('请允许浏览器弹出新窗口', 'error'); return; }
+      try { const html = await api('/api/reports/pending/' + r.id + '/view'); w.document.write(reportHtmlWithBase(html)); w.document.close(); }
+      catch (e) { w.close(); toast(e.message, 'error'); }
+    },
+    async approve(r) {
+      if (!confirm('确认通过报告 ' + (r.experiment_no || r.order_no) + '（' + r.report_type + (r.version || '') + '）？通过后写入审批人姓名并归档。')) return;
+      try { await api('/api/reports/' + r.id + '/approve', 'POST'); toast('已通过并归档', 'success'); this.load(); }
+      catch (e) { toast(e.message, 'error'); }
+    },
+    openReject(r) { this.rejectTarget = r; this.rejectReason = ''; this.rejectShow = true; },
+    async confirmReject() {
+      if (!this.rejectReason.trim()) { toast('请填写否决原因', 'error'); return; }
+      try { await api('/api/reports/' + this.rejectTarget.id + '/reject', 'POST', { reject_reason: this.rejectReason.trim() }); toast('已否决，退回实验报告', 'success'); this.rejectShow = false; this.load(); }
+      catch (e) { toast(e.message, 'error'); }
+    },
+    badge,
+  },
+  mounted() { this.load(); },
+  template: `
+  <div class="card">
+    <h3>报告审批</h3>
+    <table class="tbl"><thead><tr><th>实验编号</th><th>委托单位</th><th>类型</th><th>版本</th><th>提交人</th><th>状态</th><th>操作</th></tr></thead>
+    <tbody>
+      <tr v-for="r in pendings" :key="r.id">
+        <td><a class="link" @click="view(r)">{{r.experiment_no||r.order_no}}</a></td><td>{{r.entrust_org}}</td><td>{{r.report_type}}</td><td>{{r.version||'-'}}</td><td>{{r.issuer_name||'-'}}</td>
+        <td v-html="badge(r.status)"></td>
+        <td><button class="btn success sm" @click="approve(r)">通过</button><button class="btn danger sm" @click="openReject(r)">否决</button></td>
+      </tr>
+      <tr v-if="!pendings.length"><td colspan="7" class="empty">暂无待审批报告</td></tr>
+    </tbody></table>
+    <div class="modal-mask" v-if="rejectShow" @click.self="rejectShow=false">
+      <div class="modal" style="width:460px">
+        <h3>否决报告</h3>
+        <p style="margin:10px 0;color:#6b7a90">实验编号：{{rejectTarget.experiment_no||rejectTarget.order_no}}　|　{{rejectTarget.report_type}}{{rejectTarget.version ? '（'+rejectTarget.version+'）' : ''}}</p>
+        <label style="font-size:13px">否决原因（必填）</label>
+        <textarea v-model="rejectReason" rows="4" style="width:100%;margin-top:6px;box-sizing:border-box" placeholder="请填写否决原因"></textarea>
+        <div class="modal-actions"><button class="btn" @click="rejectShow=false">取消</button><button class="btn danger" @click="confirmReject">确认否决</button></div>
+      </div>
+    </div>
+  </div>`,
+};
+
+/* ---------------- 归档报告 ---------------- */
+const ReportArchiveView = {
+  data: () => ({ archives: [], type: '', keyword: '' }),
+  methods: {
+    async load() {
+      const q = (this.type ? 'type=' + encodeURIComponent(this.type) : '') + (this.keyword ? (this.type ? '&' : '') + 'keyword=' + encodeURIComponent(this.keyword) : '');
+      this.archives = await api('/api/reports/archive' + (q ? '?' + q : ''));
+    },
+    async view(r) {
+      const w = window.open('', '_blank');
+      if (!w) { toast('请允许浏览器弹出新窗口', 'error'); return; }
+      try {
+        const html = await api('/api/reports/archive/' + r.id + '/view');
+        w.document.write(reportHtmlWithBase(html)); w.document.close();
+      } catch (e) { w.close(); toast(e.message, 'error'); }
+    },
+    async del(r) { if (confirm('确认作废报告 ' + r.report_no + '？')) { await api('/api/reports/archive/' + r.id, 'DELETE'); this.load(); } },
+    async downloadDocx(r) {
+      try {
+        const headers = {};
+        if (state.token) headers['Authorization'] = 'Bearer ' + state.token;
+        const res = await fetch('/api/reports/archive/' + r.id + '/docx', { headers });
+        if (res.status === 401) { logout(); throw new Error('未登录或登录已过期'); }
+        if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error((d && d.detail) || '下载失败'); }
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = (r.report_no || 'report') + '_' + r.report_type + '.docx';
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 2000);
+      } catch (e) { toast(e.message, 'error'); }
+    },
+    badge,
+  },
+  mounted() { this.load(); },
+  template: `
+  <div class="card">
+    <div class="toolbar"><h3 style="flex:1">归档报告</h3>
+      <select v-model="type" @change="load"><option value="">全部类型</option><option>委托记录单</option><option>检测报告</option></select>
+      <input v-model="keyword" placeholder="编号/样品/单位关键字" @keyup.enter="load"><button class="btn primary" @click="load">查询</button></div>
+    <table class="tbl"><thead><tr><th>报告编号</th><th>委托编号</th><th>实验编号</th><th>委托单位</th><th>类型</th><th>版本</th><th>状态</th><th>签发人</th><th>签发时间</th><th>操作</th></tr></thead>
+    <tbody>
+      <tr v-for="r in archives" :key="r.id">
+        <td>{{r.report_no}}</td><td>{{r.order_no}}</td><td>{{r.experiment_no||'-'}}</td><td>{{r.entrust_org}}</td><td>{{r.report_type}}</td><td>{{r.version||'-'}}</td>
+        <td v-html="badge(r.status)"></td><td>{{r.approver_name || r.issuer_name || '-'}}</td><td>{{fmtDT(r.issued_at)}}</td>
+        <td><button class="btn link" @click="view(r)">查看</button><button class="btn link" v-if="r.has_docx" @click="downloadDocx(r)">下载Word</button><button class="btn link" v-if="state.role==='admin'" @click="del(r)">作废</button></td>
+      </tr>
+      <tr v-if="!archives.length"><td colspan="10" class="empty">暂无归档报告</td></tr>
+    </tbody></table>
   </div>`,
 };
 
@@ -2598,7 +2674,7 @@ function emptyCustomer() { return { name: '', contact: '', phone: '', email: '',
 const RootApp = {
   components: {
     LoginPage, PublicPage, MainLayout, Dashboard, OrderNew, OrderQuery, ReviewView,
-    SamplesView, ScheduleView, ExperimentStartView, ExperimentEndView, ReportsView, EquipmentView, BoardsView, HandoverView, UsersView,
+    SamplesView, ScheduleView, ExperimentStartView, ExperimentEndView, ReportsView, ReportApprovalView, ReportArchiveView, EquipmentView, BoardsView, HandoverView, UsersView,
     StatisticsView, AuditLogView, CustomersView, TestCaseLibrary,
   },
   data: () => ({ allEq: [], reviewId: null }),
@@ -2620,7 +2696,7 @@ const RootApp = {
 };
 
 /* ---------------- 路由 ---------------- */
-const routes = ['/dashboard', '/orders/new', '/orders/query', '/review', '/samples', '/schedule', '/expstart', '/expend', '/reports', '/equipment', '/boards', '/handover', '/statistics', '/customers', '/audit', '/users', '/cases'];
+const routes = ['/dashboard', '/orders/new', '/orders/query', '/review', '/samples', '/schedule', '/expstart', '/expend', '/reports', '/reports/approval', '/reports/archive', '/equipment', '/boards', '/handover', '/statistics', '/customers', '/audit', '/users', '/cases'];
 function applyRoute() {
   const h = location.hash.slice(1);
   const home = homeRoute(state.role);
@@ -2641,7 +2717,7 @@ const _components = {
   'dashboard': Dashboard, 'order-new': OrderNew, 'order-query': OrderQuery,
   'review-view': ReviewView, 'samples-view': SamplesView, 'schedule-view': ScheduleView,
   'exp-start-view': ExperimentStartView, 'exp-end-view': ExperimentEndView,
-  'reports-view': ReportsView, 'equipment-view': EquipmentView,
+  'reports-view': ReportsView, 'report-approval': ReportApprovalView, 'report-archive': ReportArchiveView, 'equipment-view': EquipmentView,
   'boards-view': BoardsView, 'handover-view': HandoverView, 'users-view': UsersView,
   'statistics-view': StatisticsView, 'customers-view': CustomersView, 'audit-view': AuditLogView,
   'testcase-library': TestCaseLibrary,

@@ -140,6 +140,7 @@ def list_orders(
     keyword: str | None = Query(None),
     page: int | None = Query(None, ge=1),
     size: int | None = Query(None, ge=1, le=500),
+    mine: bool = Query(False),
 ):
     q = db.query(EntrustOrder)
     # 委托人只能看到自己名下的委托单：优先按账号 id 隔离，历史无 id 数据按姓名兜底
@@ -148,6 +149,9 @@ def list_orders(
             EntrustOrder.entruster_user_id == user.id,
             EntrustOrder.entruster == user.name,
         ))
+    # 实验员「实验报告」只看自己的：按「实验开始」选定的实验员（排期 experimenter_id）隔离
+    if mine and user.role == "experimenter":
+        q = q.filter(EntrustOrder.id.in_(db.query(Schedule.order_id).filter(Schedule.experimenter_id == user.id)))
     if status:
         q = q.filter(EntrustOrder.status == status)
     if keyword:

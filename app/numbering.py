@@ -75,20 +75,21 @@ def max_sample_seq(db: Session, experiment_no: str) -> int:
 
 
 def next_report_no(db: Session) -> str:
-    """报告编号：BG{YYMM}-四位流水，如 BG2608-0001。"""
-    prefix = "BG" + datetime.now().strftime("%y%m")
+    """报告编号：SY{YYYYMMDD}{三位流水}，如 SY20260922001（按天从 001 重新计数）。"""
+    now = datetime.now()
+    prefix = "SY" + now.strftime("%Y%m%d")
     row = (
         db.query(func.max(Report.report_no))
-        .filter(Report.report_no.like(f"{prefix}-%"))
+        .filter(Report.report_no.like(f"{prefix}%"))
         .scalar()
     )
     current = 0
     if row:
         try:
-            current = int(row.rsplit("-", 1)[1])
+            current = int(row[len(prefix):])
         except (ValueError, IndexError):
             current = 0
-    return f"{prefix}-{current + 1:04d}"
+    return f"{prefix}{current + 1:03d}"
 
 
 def next_batch_no(db: Session) -> str:

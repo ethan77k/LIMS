@@ -476,6 +476,10 @@ class ReportDraftRequest(BaseModel):
     content: str = ""                  # 编辑后的报告正文 HTML
 
 
+class ReportRejectRequest(BaseModel):
+    reject_reason: str = ""            # 审批否决原因（必填）
+
+
 # ---------------------------------------------------------------------------
 # 测试用例库
 # ---------------------------------------------------------------------------

@@ -8,7 +8,7 @@ import sqlite3
 from sqlalchemy import text
 
 from .database import Base, SessionLocal, engine
-from .models import EntrustOrder, Equipment, Notification, User
+from .models import EntrustOrder, Equipment, Notification, Report, User
 from .security import hash_password
 
 
@@ -33,7 +33,9 @@ def init_db():
         _migrate_schedules_experimenter(db)
         _migrate_report_content(db)
         _migrate_report_docx(db)
+        _migrate_report_approval(db)
         _migrate_schedules_sample_prev_status(db)
+        _migrate_report_no_sy(db)
         db.commit()
     finally:
         db.close()
@@ -274,6 +276,60 @@ def _migrate_report_docx(db):
         cols = [row[1] for row in db.execute(text(f"PRAGMA table_info({table})"))]
         if "docx_content" not in cols:
             db.execute(text(f"ALTER TABLE {table} ADD COLUMN docx_content BLOB"))
+
+
+def _migrate_report_approval(db):
+    """为 reports 增加审批字段（approver_id / approved_at / reject_reason / rejected_at）。幂等。"""
+    cols = [row[1] for row in db.execute(text("PRAGMA table_info(reports)"))]
+    if "approver_id" not in cols:
+        db.execute(text("ALTER TABLE reports ADD COLUMN approver_id INTEGER REFERENCES users(id)"))
+    if "approved_at" not in cols:
+        db.execute(text("ALTER TABLE reports ADD COLUMN approved_at DATETIME"))
+    if "reject_reason" not in cols:
+        db.execute(text("ALTER TABLE reports ADD COLUMN reject_reason TEXT DEFAULT ''"))
+    if "rejected_at" not in cols:
+        db.execute(text("ALTER TABLE reports ADD COLUMN rejected_at DATETIME"))
+
+
+def _migrate_report_no_sy(db):
+    """报告编号旧格式 BG{YYMM}-四位流水 统一改为 SY{YYYYMMDD}{三位流水}（按天从 001 重新计数）。幂等。
+
+    仅迁移非 SY 前缀的旧报告：按实际签发日（issued_at，缺失时退 created_at）分天，
+    按时间顺序依次编号，避免与已存在的 SY 编号撞号。
+    """
+    from collections import defaultdict
+
+    old = (
+        db.query(Report)
+        .filter(~Report.report_no.like("SY%"))
+        .order_by(Report.issued_at, Report.id)
+        .all()
+    )
+    if not old:
+        return
+
+    # 已存在的 SY 编号每天已用流水，迁移时从其后续号（避免撞号）
+    used = defaultdict(set)
+    for (no,) in db.query(Report.report_no).filter(Report.report_no.like("SY%")).all():
+        if len(no) >= 11:
+            day, seq = no[2:10], no[10:]
+            if day.isdigit() and seq.isdigit():
+                used[day].add(int(seq))
+
+    by_day = defaultdict(list)
+    for r in old:
+        dt = r.issued_at or r.created_at
+        by_day[dt.strftime("%Y%m%d")].append(r)
+
+    for day, reports in by_day.items():
+        reports.sort(key=lambda r: (r.issued_at or r.created_at, r.id))
+        seq = 1
+        for r in reports:
+            while seq in used[day]:
+                seq += 1
+            r.report_no = f"SY{day}{seq:03d}"
+            used[day].add(seq)
+            seq += 1
 
 
 def _seed_users(db):

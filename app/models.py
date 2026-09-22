@@ -357,11 +357,16 @@ class Report(Base):
     report_no: Mapped[str] = mapped_column(String(40), unique=True, index=True)  # 报告编号
     report_type: Mapped[str] = mapped_column(String(32), default="")  # 委托记录单 / 检测报告
     version: Mapped[str] = mapped_column(String(16), default="")      # 常规 / 检测（检测报告用）
-    status: Mapped[str] = mapped_column(String(16), default="已签发")  # 草稿 / 已签发 / 已作废
+    status: Mapped[str] = mapped_column(String(16), default="待审批")  # 草稿 / 待审批 / 已驳回 / 已签发 / 已作废
     content: Mapped[str] = mapped_column(Text, default="")             # 报告正文快照 HTML（编辑后签发时保存，空则实时生成）
     docx_content: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)  # 报告正文快照 .docx（OnlyOffice 编辑后，打印/归档以它为准）
-    issuer_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    issuer_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)  # 提交人（实验员）
     issuer: Mapped["User | None"] = relationship("User", foreign_keys=[issuer_id])
+    approver_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)  # 审批人（管理员）
+    approver: Mapped["User | None"] = relationship("User", foreign_keys=[approver_id])
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    reject_reason: Mapped[str] = mapped_column(Text, default="")       # 审批否决原因
+    rejected_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     issued_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
 
