@@ -4,6 +4,11 @@ sqlalchemy>=2.0
 pydantic>=2.6
 PyJWT>=2.8
 python-multipart>=0.0.9
+# 二维码（样品扫码查询，PNG 需 Pillow）
+qrcode>=7.4
+Pillow>=10.0
 # OnlyOffice 在线编辑：真 .docx / .xlsx 生成（替代 altChunk）
 python-docx>=1.1
 openpyxl>=3.1
+# 报告「用本机 Word 打开/编辑」走 Word COM（仅 Windows）
+pywin32>=306; sys_platform == "win32"
