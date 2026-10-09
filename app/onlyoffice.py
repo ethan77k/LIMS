@@ -47,22 +47,43 @@ def verify_token(token: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# 文档 key：自描述 + HMAC 签名，无需持久化映射（无状态、多实例安全）
+# 文档 key：短随机 ID + HMAC 签名，载荷落盘到工作区
+#
+# OnlyOffice 对 document.key 有 128 字符上限。此前把中文载荷 base64 后直接塞进
+# key，报告类会超长（131+），导致编辑器无法加载。改为：完整载荷 JSON 落盘，
+# key 只携带 16 位随机 ID + 12 位签名（共 28 字符），且不再受载荷长度影响。
 # ---------------------------------------------------------------------------
+_KEY_ID_LEN = 16
+_KEY_SIG_LEN = 12
+
+
+def _key_payload_file(sid: str) -> Path:
+    """文档 key 载荷的落盘位置（key 本身是短 ID，完整载荷存这里）。"""
+    ONLYOFFICE_WORK_DIR.mkdir(parents=True, exist_ok=True)
+    return ONLYOFFICE_WORK_DIR / f"key_{sid}.json"
+
+
 def make_key(payload: dict) -> str:
-    body = json.dumps(payload, sort_keys=True, ensure_ascii=False)
-    b64 = base64.urlsafe_b64encode(body.encode("utf-8")).decode().rstrip("=")
-    sig = hmac.new(ONLYOFFICE_JWT_SECRET.encode(), b64.encode(), hashlib.sha256).hexdigest()[:16]
-    return f"{b64}.{sig}"
+    """生成 28 字符的文档 key（16 位随机 ID + 12 位 HMAC 签名）。"""
+    sid = uuid.uuid4().hex[:_KEY_ID_LEN]
+    sig = hmac.new(ONLYOFFICE_JWT_SECRET.encode(), sid.encode(), hashlib.sha256).hexdigest()[:_KEY_SIG_LEN]
+    _key_payload_file(sid).write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    return sid + sig
 
 
 def parse_key(key: str) -> dict:
-    b64, sig = key.rsplit(".", 1)
-    expect = hmac.new(ONLYOFFICE_JWT_SECRET.encode(), b64.encode(), hashlib.sha256).hexdigest()[:16]
+    """校验 key 签名并取回落盘的载荷。"""
+    if len(key) != _KEY_ID_LEN + _KEY_SIG_LEN:
+        raise ValueError("非法文档 key")
+    sid = key[:_KEY_ID_LEN]
+    sig = key[_KEY_ID_LEN:]
+    expect = hmac.new(ONLYOFFICE_JWT_SECRET.encode(), sid.encode(), hashlib.sha256).hexdigest()[:_KEY_SIG_LEN]
     if not hmac.compare_digest(expect, sig):
         raise ValueError("文档 key 签名校验失败")
-    pad = "=" * (-len(b64) % 4)
-    return json.loads(base64.urlsafe_b64decode(b64 + pad).decode("utf-8"))
+    fp = _key_payload_file(sid)
+    if not fp.exists():
+        raise ValueError("文档 key 已失效或不存在")
+    return json.loads(fp.read_text(encoding="utf-8"))
 
 
 def work_file(key: str, suffix: str) -> Path:
