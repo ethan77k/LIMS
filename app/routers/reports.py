@@ -1052,9 +1052,17 @@ def _import_word_html(html_path: Path, files_dir: Path) -> str:
 
 
 def _fill_docx_template(template_bytes: bytes, mapping: dict[str, str]) -> str:
-    """把 .docx 模板写到明文区 → Word Find&Replace 占位符 → 导出筛选 HTML → 清洗返回正文。"""
-    import pythoncom
-    import win32com.client
+    """把 .docx 模板填充占位符并返回正文 HTML。
+
+    Windows 上优先用 Word COM（排版最准）；无 Word（Linux）时回退到
+    python-docx 填充 + .docx 读回为简易 HTML。
+    """
+    try:
+        import pythoncom  # noqa: F401
+        import win32com.client  # noqa: F401
+    except ImportError:
+        filled = onlyoffice.fill_docx_template(template_bytes, mapping)
+        return onlyoffice.docx_to_html(filled)
 
     stem = _WORD_TMP_DIR / f"lims_tpl_{uuid.uuid4().hex}"
     docx_path = stem.with_suffix(".docx")

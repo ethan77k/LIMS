@@ -172,6 +172,62 @@ def fill_docx_template(template_bytes: bytes, mapping: dict[str, str]) -> bytes:
     return buf.getvalue()
 
 
+def docx_to_html(docx_bytes: bytes) -> str:
+    """把 .docx 读回为简易 HTML（段落 + 表格，保留加粗）。
+
+    用于「自定义报告」模板填充在无 Word（Linux）环境下的兜底：先用
+    fill_docx_template 生成 .docx，再读回为 HTML 供预览/下载。
+    """
+    from docx import Document
+    from docx.oxml.ns import qn
+    from docx.table import Table
+    from docx.text.paragraph import Paragraph
+
+    doc = Document(io.BytesIO(docx_bytes))
+
+    def _esc(t: str) -> str:
+        return t.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    def _inline(p) -> str:
+        parts = []
+        for r in p.runs:
+            t = _esc(r.text or "")
+            if not t:
+                continue
+            parts.append(f"<b>{t}</b>" if r.bold else t)
+        return "".join(parts)
+
+    def _para(p) -> str:
+        txt = _inline(p)
+        if not txt.strip():
+            return "<p>&nbsp;</p>"
+        align = ""
+        try:
+            if p.alignment is not None and p.alignment.name == "CENTER":
+                align = ' style="text-align:center"'
+        except Exception:
+            pass
+        return f"<p{align}>{txt}</p>"
+
+    def _table(tbl) -> str:
+        rows = []
+        for row in tbl.rows:
+            cells = []
+            for cell in row.cells:
+                cell_txt = " ".join(_inline(p) for p in cell.paragraphs).strip()
+                cells.append(f"<td>{cell_txt or '&nbsp;'}</td>")
+            rows.append("<tr>" + "".join(cells) + "</tr>")
+        return "<table>" + "".join(rows) + "</table>"
+
+    out = []
+    for child in doc.element.body.iterchildren():
+        if child.tag == qn("w:p"):
+            out.append(_para(Paragraph(child, doc)))
+        elif child.tag == qn("w:tbl"):
+            out.append(_table(Table(child, doc)))
+    return "\n".join(out)
+
+
 # ---------------------------------------------------------------------------
 # HTML → 真 .docx（python-docx，供内置报告无模板时兜底生成）
 # ---------------------------------------------------------------------------
