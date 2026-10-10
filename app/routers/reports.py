@@ -576,7 +576,7 @@ def _entrust_body(o: EntrustOrder) -> str:
     <tr><td class="lbl">检验依据</td><td colspan="9">{_fmt(o.test_basis) or '客户自定义条件'}</td></tr>
     <tr><td class="lbl">试验原因</td><td colspan="2">{_fmt(o.test_reason)}</td><td class="lbl">报告要求</td><td colspan="2">{_fmt(o.report_lang)}</td><td class="lbl">试验成本</td><td colspan="2">{o.total_cost} 元</td></tr>
     <tr><td class="lbl">样品状态</td><td colspan="2">{_fmt(o.sample_status)}</td><td class="lbl">存放要求</td><td colspan="2">{_fmt(o.storage_require)}</td><td class="lbl">样品处理</td><td colspan="2">{_fmt(o.sample_dispose)}</td></tr>
-    <tr><td class="lbl">试验条件</td><td colspan="9">{_fmt(o.test_condition)}</td></tr>
+    <tr><td class="lbl">测试条件</td><td colspan="9">{_fmt(o.test_condition)}</td></tr>
     <tr><td class="lbl">备注</td><td colspan="9">{_fmt(o.remark)}</td></tr>
     <tr><td class="lbl">委托方签名</td><td colspan="2" class="sig"></td><td class="lbl">实验室签名</td><td colspan="3" class="sig"></td><td class="lbl">接收人</td><td colspan="2">{_fmt(o.entruster)}</td></tr>
     <tr><td class="lbl">接收日期</td><td colspan="2">{_dt_short(o.created_at)}</td><td class="lbl">试验编号</td><td colspan="3">{_fmt(o.experiment_no)}</td><td class="lbl">试验员</td><td colspan="2">{_fmt(o.reviewer.name if o.reviewer else '')}</td></tr>
@@ -653,7 +653,7 @@ def _reliability_body(o: EntrustOrder, schedules, _res) -> str:
     <tr><td colspan="2" class="lbl">设备名称</td><td colspan="2" class="lbl">设备型号</td><td colspan="2" class="lbl">资产编号</td><td colspan="2" class="lbl">校准有效期</td></tr>
     {eq_rows}
     <tr><td class="lbl">测试条件</td><td colspan="7">{_fmt(o.test_condition)}</td></tr>
-    <tr><td class="lbl">测试方法</td><td colspan="7" class="qm-tall"></td></tr>
+    <tr><td class="lbl">测试方法</td><td colspan="7">{_fmt(o.test_method)}</td></tr>
     <tr><td class="lbl">判定标准</td><td colspan="7" class="qm-tall">{_fmt(o.criteria)}</td></tr>
   </table>
 
@@ -717,7 +717,7 @@ def _test_body(o: EntrustOrder, version: str = "常规") -> str:
     if version == "常规":
         return _reliability_body(o, schedules, _res)
 
-    # 检测版：逐测试位编号 + 结果，附样品编号、试验条件与实物图占位
+    # 检测版：逐测试位编号 + 结果，附样品编号、测试条件与实物图占位
     header_cells = ''.join(
         f'<td style="text-align:center;font-weight:600">{i+1}#</td>' for i in range(len(schedules))
     ) or '<td></td>'
@@ -730,7 +730,7 @@ def _test_body(o: EntrustOrder, version: str = "常规") -> str:
         '<tr><td class="lbl" rowspan="2">检验结果<br>Test Result</td>' + header_cells + '</tr>'
         '<tr>' + (result_cells or '<td></td>') + '</tr>'
         f'<tr><td class="lbl">样品编号</td><td colspan="9">{sample_nos or "-"}</td></tr>'
-        f'<tr><td class="lbl">试验条件</td><td colspan="9">{_fmt(o.test_condition) or "-"}</td></tr>'
+        f'<tr><td class="lbl">测试条件</td><td colspan="9">{_fmt(o.test_condition) or "-"}</td></tr>'
     )
     extra = (
         '<div style="margin-top:10px"><b>试验前样品图片 (Samples Before Test)：</b>'
@@ -757,6 +757,168 @@ def _test_body(o: EntrustOrder, version: str = "常规") -> str:
 
 def render_test_html(o: EntrustOrder, version: str = "常规") -> str:
     return _wrap_report(_test_body(o, version), f"检测报告 {o.experiment_no or o.order_no}")
+
+
+# ---------------------------------------------------------------------------
+# .xlsx 表格式报告（cell 版）
+# ---------------------------------------------------------------------------
+def _pv(v):
+    """纯文本取值：None/空串 → ''，其余 str（不做 HTML 转义，供 xlsx 用）。"""
+    return "" if v in (None, "") else str(v)
+
+
+def _xlsx_entrust(o):
+    m = _custom_mapping(o)
+    L, V, B = "label", "value", "blank"
+    rows = [
+        [("委托单位", 2, L), (_pv(o.entrust_org), 6, V)],
+        [("委托人", 2, L), (_pv(o.entruster), 6, V)],
+        [("样品型号", 2, L), (_pv(o.sample_model), 6, V)],
+        [("样品数量", 2, L), (m["样品数量"], 6, V)],
+        [("客户型号", 2, L), (_pv(o.customer_model), 6, V)],
+        [("检测项目", 2, L), (_pv(o.test_item), 6, V)],
+        [("项目名称", 2, L), (_pv(o.test_item_en), 6, V)],
+        [("检验依据", 2, L), (_pv(o.test_basis) or "客户自定义条件", 6, V)],
+        [("试验原因", 2, L), (_pv(o.test_reason), 6, V)],
+        [("报告要求", 2, L), (_pv(o.report_lang), 6, V)],
+        [("试验成本", 2, L), (f"{o.total_cost} 元", 6, V)],
+        [("样品状态", 2, L), (_pv(o.sample_status), 6, V)],
+        [("存放要求", 2, L), (_pv(o.storage_require), 6, V)],
+        [("样品处理", 2, L), (_pv(o.sample_dispose), 6, V)],
+        [("测试条件", 2, L), (_pv(o.test_condition), 6, V)],
+        [("备注", 2, L), (_pv(o.remark), 6, V)],
+        [("委托方签名", 2, L), ("", 6, B)],
+        [("实验室签名", 2, L), ("", 6, B)],
+        [("接收人", 2, L), (_pv(o.entruster), 6, V)],
+        [("接收日期", 2, L), (_dt_short(o.created_at), 6, V)],
+        [("试验编号", 2, L), (_pv(o.experiment_no), 6, V)],
+        [("试验员", 2, L), (_pv(o.reviewer.name if o.reviewer else ""), 6, V)],
+        [("样品编号", 2, L), (m["样品编号"], 6, V)],
+        [("试验时间", 2, L), (f"{_dt_full(o.created_at)} ~ {_dt_full(o.finish_at)}", 6, V)],
+    ]
+    return ("试验委托记录单", "表-TC05-01A", rows)
+
+
+def _xlsx_reliability(o):
+    m = _custom_mapping(o)
+    L, V, S, B = "label", "value", "sec", "blank"
+    schedules = list(o.schedules)
+
+    def _res(s):
+        return s.result or (s.sample.result if s.sample else "")
+
+    res_vals = [_res(s) for s in schedules]
+    ok = res_vals.count("OK")
+    ng = res_vals.count("NG")
+    verdict = ""
+    if schedules and not (ok == 0 and ng == 0):
+        verdict = "合格" if (ng == 0 and ok == len(schedules)) else "不合格"
+    starts = [s.actual_start for s in schedules if s.actual_start]
+    ends = [s.actual_end for s in schedules if s.actual_end]
+    date_text = _range(min(starts) if starts else None, max(ends) if ends else None) or _range(o.created_at, o.finish_at)
+
+    eqs, seen = [], set()
+    for s in schedules:
+        e = s.equipment
+        if e and e.id not in seen:
+            seen.add(e.id)
+            eqs.append(e)
+
+    rows = [
+        [("测试项目", 2, L), (m["检测项目"], 6, V)],
+        [("样品数量", 2, L), (m["样品数量"], 2, V), ("结果判定", 2, L), (verdict, 2, V)],
+        [("样品型号", 2, L), (m["样品型号"], 2, V), ("样品阶段", 2, L), (m["测试阶段"], 2, V)],
+        [("测试日期", 2, L), (date_text, 2, V), ("测试环境", 2, L), ("", 2, B)],
+        [("硬件版本", 2, L), ("", 2, B), ("软件版本", 2, L), ("", 2, B)],
+        [("测试标准", 2, L), (m["检测依据"], 6, V)],
+        [("测试目的", 2, L), (m["试验原因"], 6, V)],
+        [("设备信息", 8, S)],
+    ]
+    if eqs:
+        for e in eqs:
+            rows.append([("设备", 2, L), (f"{_pv(e.name)}　{_pv(e.model)}　{_pv(e.code)}　{_range(e.valid_from, e.valid_to)}", 6, V)])
+    else:
+        rows.append([("设备", 2, L), ("", 6, B)])
+    rows += [
+        [("测试条件", 2, L), (m["测试条件"], 6, V)],
+        [("测试方法", 2, L), (m["测试方法"], 6, V)],
+        [("判定标准", 2, L), (m["判定标准"], 6, V)],
+        [("检查清单", 8, S)],
+    ]
+    for i in range(1, 5):
+        rows.append([(f"检查项 {i}（测试前 / 测试后）", 2, L), ("", 6, B)])
+    rows.append([("测试结果", 8, S)])
+    for s in schedules:
+        no = s.sample.sample_no if s.sample else ""
+        r = _res(s)
+        kind = "ok" if r == "OK" else ("ng" if r == "NG" else "blank")
+        rows.append([(no, 2, V), (r or "", 6, kind)])
+    if not schedules:
+        rows.append([("", 2, B), ("", 6, B)])
+    rows += [
+        [("结果描述", 8, S)],
+        [("", 2, B), ("", 6, B)],
+        [("实验员", 2, L), (m["实验员"], 2, V), ("审核", 2, L), ("", 2, B)],
+        [("批准", 2, L), ("", 6, B)],
+    ]
+    return ("Reliability Test Report", "QM-F-46", rows)
+
+
+def _xlsx_test(o):
+    m = _custom_mapping(o)
+    L, V, S, B = "label", "value", "sec", "blank"
+    schedules = list(o.schedules)
+
+    def _res(s):
+        return s.result or (s.sample.result if s.sample else "")
+
+    res_vals = [_res(s) for s in schedules]
+    ok = res_vals.count("OK")
+    ng = res_vals.count("NG")
+    passed = "合格" if (schedules and ng == 0 and ok == len(schedules)) else "不合格"
+    passed_en = "Passed" if passed == "合格" else "Failed"
+    result_text = "；".join(f"{i + 1}# {_res(s) or '-'}" for i, s in enumerate(schedules))
+
+    rows = [
+        [("预检查 Pre-check", 8, S)],
+        [("委托单编号", 2, L), (m["委托单编号"], 6, V)],
+        [("接收时间", 2, L), (m["委托时间"], 6, V)],
+        [("样品检查", 2, L), (m["样品状态"], 6, V)],
+        [("样品状态", 2, L), (m["样品状态"], 6, V)],
+        [("检验结果 Test Result", 8, S)],
+        [("检验结果", 2, L), (result_text, 6, V)],
+        [("样品编号", 2, L), (m["样品编号"], 6, V)],
+        [("测试条件", 2, L), (m["测试条件"], 6, V)],
+        [("测试结果", 2, L), (f"试验后样品外观正常。测试结果：{passed} Test Result: {passed_en}", 6, V)],
+        [("备注 Remark", 2, L), (m["备注"], 6, V)],
+        [("拟制人", 2, L), ("", 2, B), ("授权签字人", 2, L), (m["实验员"], 2, V)],
+        [("签字人职务", 2, L), ("□中心主任 □技术负责人", 2, V), ("审核人", 2, L), (m["委托人"], 2, V)],
+        [("签发日期", 2, L), (m["完成时间"], 6, V)],
+    ]
+    return ("检测报告 Test Report（检测版）", "表-TC11-02A", rows)
+
+
+def _xlsx_rows(o, report_type, version):
+    if report_type == "委托记录单":
+        return _xlsx_entrust(o)
+    if report_type == "检测报告":
+        return _xlsx_reliability(o) if version == "常规" else _xlsx_test(o)
+    return None
+
+
+def _build_report_xlsx(db, o, report_type, version):
+    if report_type == "自定义报告":
+        tpl = db.query(ReportTemplate).filter(ReportTemplate.name == version).first()
+        if tpl is None:
+            raise HTTPException(404, f"报告模板「{version}」不存在或已被删除")
+        if tpl.kind != "xlsx":
+            raise HTTPException(400, f"模板「{version}」是 Word 模板，请选择 .xlsx 模板用于表格版报告")
+        return onlyoffice.fill_xlsx_template(tpl.content, _custom_mapping(o))
+    r = _xlsx_rows(o, report_type, version)
+    if r is None:
+        raise HTTPException(400, "该报告类型暂不支持表格版")
+    title, head, rows = r
+    return onlyoffice.form_xlsx(rows, title, head)
 
 
 def _custom_mapping(o: EntrustOrder) -> dict[str, str]:
@@ -798,7 +960,8 @@ def _custom_mapping(o: EntrustOrder) -> dict[str, str]:
         "检测依据": _p(o.test_basis),
         "试验原因": _p(o.test_reason),
         "测试阶段": _p(o.test_stage),
-        "试验条件": _p(o.test_condition),
+        "测试条件": _p(o.test_condition),
+        "测试方法": _p(o.test_method),
         "判定标准": _p(o.criteria),
         "样品状态": _p(o.sample_status),
         "样品处理": _p(o.sample_dispose),
@@ -855,41 +1018,73 @@ def _load_order_full(db: Session, order_id: int) -> EntrustOrder:
     return o
 
 
-def build_report_docx(db: Session, order_id: int, report_type: str, version: str) -> tuple[bytes, str]:
-    """构建报告的真 .docx：优先草稿 .docx，否则生成（自定义用模板填充 / 内置用 HTML 转换）并落草稿。"""
+_DOCX_MT = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+_XLSX_MT = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+def build_report_file(db: Session, order_id: int, report_type: str, version: str, fmt: str = "word") -> tuple[bytes, str, str]:
+    """构建报告文件：fmt=word 生成 .docx，fmt=cell 生成 .xlsx。优先草稿对应格式，否则生成并落草稿。返回 (bytes, 文件名, 媒体类型)。"""
     o = _load_order_full(db, order_id)
     report_type, version = _normalize_type_version(report_type, version)
     if report_type in ("检测报告", "自定义报告") and o.status != "已完成":
         raise HTTPException(400, "实验未完成，暂不能编辑该报告")
     draft = _load_draft(db, order_id, report_type, version)
-    if draft and draft.docx_content:
-        data = draft.docx_content
+    if fmt == "cell":
+        if draft and draft.xlsx_content:
+            data = draft.xlsx_content
+            draft.format = fmt
+            db.commit()
+        else:
+            data = _build_report_xlsx(db, o, report_type, version)
+            if draft:
+                draft.xlsx_content = data
+                draft.format = fmt
+            else:
+                db.add(ReportDraft(order_id=order_id, report_type=report_type, version=version, content="", xlsx_content=data, format=fmt))
+            db.commit()
+        suffix, mime = "xlsx", _XLSX_MT
     else:
-        if report_type == "自定义报告":
-            tpl = db.query(ReportTemplate).filter(ReportTemplate.name == version).first()
-            if tpl is None:
-                raise HTTPException(404, f"报告模板「{version}」不存在或已被删除")
-            data = onlyoffice.fill_docx_template(tpl.content, _custom_mapping(o))
+        if draft and draft.docx_content:
+            data = draft.docx_content
+            draft.format = fmt
+            db.commit()
         else:
-            data = onlyoffice.html_to_docx(_body_for(db, o, report_type, version))
-        if draft:
-            draft.docx_content = data
-        else:
-            db.add(ReportDraft(order_id=order_id, report_type=report_type, version=version, content="", docx_content=data))
-        db.commit()
-    name = f"{o.experiment_no or o.order_no}_{report_type}{'_' + version if version else ''}.docx"
-    return data, name
+            if report_type == "自定义报告":
+                tpl = db.query(ReportTemplate).filter(ReportTemplate.name == version).first()
+                if tpl is None:
+                    raise HTTPException(404, f"报告模板「{version}」不存在或已被删除")
+                data = onlyoffice.fill_docx_template(tpl.content, _custom_mapping(o))
+            else:
+                data = onlyoffice.html_to_docx(_body_for(db, o, report_type, version))
+            if draft:
+                draft.docx_content = data
+                draft.format = fmt
+            else:
+                db.add(ReportDraft(order_id=order_id, report_type=report_type, version=version, content="", docx_content=data, format=fmt))
+            db.commit()
+        suffix, mime = "docx", _DOCX_MT
+    name = f"{o.experiment_no or o.order_no}_{report_type}{'_' + version if version else ''}.{suffix}"
+    return data, name, mime
 
 
-def save_report_docx(db: Session, order_id: int, report_type: str, version: str, docx_bytes: bytes, user: User | None = None) -> None:
-    """把 OnlyOffice 回调回传的 .docx 存入草稿（.docx 为准）。"""
+def save_report_file(db: Session, order_id: int, report_type: str, version: str, fmt: str, data_bytes: bytes, user: User | None = None) -> None:
+    """把 OnlyOffice 回调回传的文件存入草稿（按 fmt 存 docx/xlsx），并记录「最后保存格式」。"""
     report_type, version = _normalize_type_version(report_type, version)
     draft = _load_draft(db, order_id, report_type, version)
     if draft:
-        draft.docx_content = docx_bytes
+        if fmt == "cell":
+            draft.xlsx_content = data_bytes
+        else:
+            draft.docx_content = data_bytes
+        draft.format = fmt
         draft.updated_at = datetime.now()
     else:
-        draft = ReportDraft(order_id=order_id, report_type=report_type, version=version, content="", docx_content=docx_bytes)
+        kwargs = dict(order_id=order_id, report_type=report_type, version=version, content="", format=fmt)
+        if fmt == "cell":
+            kwargs["xlsx_content"] = data_bytes
+        else:
+            kwargs["docx_content"] = data_bytes
+        draft = ReportDraft(**kwargs)
         db.add(draft)
     if user is not None:
         o = db.get(EntrustOrder, order_id)
@@ -902,28 +1097,30 @@ def online_open(
     order_id: int,
     type: str = Query("检测报告"),
     version: str = Query(""),
+    format: str = Query("word"),
     db: Session = Depends(get_db),
     user: User = Depends(require_roles("admin", "experimenter")),
 ):
-    """生成报告 .docx 并返回 OnlyOffice 编辑器配置（前端 iframe 加载用）。"""
+    """生成报告文件（word/.docx 或 cell/.xlsx）并返回 OnlyOffice 编辑器配置。"""
     if not onlyoffice.is_enabled():
         raise HTTPException(503, "未配置 OnlyOffice，请设置 LIMS_ONLYOFFICE_URL / LIMS_ONLYOFFICE_JWT_SECRET 后启用")
-    data, name = build_report_docx(db, order_id, type, version)
+    fmt = "cell" if format == "cell" else "word"
+    data, name, _mime = build_report_file(db, order_id, type, version, fmt)
     o = db.get(EntrustOrder, order_id)
     report_type, version = _normalize_type_version(type, version)
-    key = onlyoffice.make_key({"kind": "report", "order_id": order_id, "report_type": report_type, "version": version})
-    onlyoffice.work_file(key, "docx").write_bytes(data)
+    key = onlyoffice.make_key({"kind": "report", "order_id": order_id, "report_type": report_type, "version": version, "format": fmt})
+    onlyoffice.work_file(key, "xlsx" if fmt == "cell" else "docx").write_bytes(data)
     config = onlyoffice.editor_config(
         key=key,
         title=name,
-        file_type="docx",
-        document_type="word",
+        file_type="xlsx" if fmt == "cell" else "docx",
+        document_type="cell" if fmt == "cell" else "word",
         user_id=user.id,
         user_name=user.name,
         download_path=f"/api/oo/download?key={key}",
         callback_path="/api/oo/callback",
     )
-    log(db, user, "启动在线编辑", "report", order_id, f"{o.experiment_no or o.order_no if o else ''} {report_type}{version}")
+    log(db, user, "启动在线编辑", "report", order_id, f"{o.experiment_no or o.order_no if o else ''} {report_type}{version}/{fmt}")
     return config
 
 
@@ -1348,10 +1545,12 @@ def issue_report(
     # version 与草稿保持一致（检测报告默认「常规」，委托记录单固定空），避免草稿与 Report 版本错位
     _, version = _normalize_type_version(data.report_type, data.version)
     draft = _load_draft(db, order_id, data.report_type, data.version)
-    if not draft or not (draft.content or draft.docx_content):
+    if not draft or not (draft.content or draft.docx_content or draft.xlsx_content):
         raise HTTPException(400, "请先编辑并保存该类型报告草稿")
     content = draft.content or ""
     docx_content = draft.docx_content or None
+    xlsx_content = draft.xlsx_content or None
+    fmt = draft.format or "word"
 
     existing = (
         db.query(Report)
@@ -1373,6 +1572,8 @@ def issue_report(
         existing.status = "待审批"
         existing.content = content
         existing.docx_content = docx_content
+        existing.xlsx_content = xlsx_content
+        existing.format = fmt
         existing.issuer_id = user.id
         existing.reject_reason = ""
         existing.rejected_at = None
@@ -1386,7 +1587,7 @@ def issue_report(
         r = Report(
             order_id=order_id, report_no=next_report_no(db),
             report_type=data.report_type, version=version, status="待审批",
-            content=content, docx_content=docx_content, issuer_id=user.id,
+            content=content, docx_content=docx_content, xlsx_content=xlsx_content, format=fmt, issuer_id=user.id,
         )
         db.add(r)
         db.flush()
@@ -1438,8 +1639,7 @@ def approve_report(report_id: int, db: Session = Depends(get_db), user: User = D
     if r.status != "待审批":
         raise HTTPException(400, "该报告不在待审批状态")
     o = _load_order_full(db, r.order_id)
-    content = r.content or _body_for(db, o, r.report_type, r.version)
-    r.content = _inject_approver_name(content, user.name)
+    # 审批人姓名暂不注入报告正文（后续再处理）
     r.status = "已签发"
     r.approver_id = user.id
     r.approved_at = datetime.now()
@@ -1545,6 +1745,21 @@ def archive_docx(report_id: int, db: Session = Depends(get_db), _: User = Depend
     filename = f"{r.report_no}_{r.report_type}.docx"
     disp = f"attachment; filename=\"report.docx\"; filename*=UTF-8''{quote(filename)}"
     return Response(r.docx_content, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document", headers={"Content-Disposition": disp})
+
+
+@router.get("/archive/{report_id}/xlsx")
+def archive_xlsx(report_id: int, db: Session = Depends(get_db), _: User = Depends(require_roles("admin", "experimenter"))):
+    """下载归档报告的 .xlsx（cell 版表格报告）。"""
+    from urllib.parse import quote
+
+    r = db.get(Report, report_id)
+    if r is None:
+        raise HTTPException(404, "报告不存在")
+    if not r.xlsx_content:
+        raise HTTPException(404, "该报告没有 .xlsx 版本")
+    filename = f"{r.report_no}_{r.report_type}.xlsx"
+    disp = f"attachment; filename=\"report.xlsx\"; filename*=UTF-8''{quote(filename)}"
+    return Response(r.xlsx_content, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": disp})
 
 
 @router.delete("/archive/{report_id}")

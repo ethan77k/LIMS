@@ -85,6 +85,7 @@ class OrderCreate(BaseModel):
     storage_require: str = "常温存放"
     sample_dispose: str = "退还"
     test_condition: str = ""
+    test_method: str = ""
     criteria: str = ""
     remark: str = ""
     required_start: datetime | None = None
@@ -119,6 +120,7 @@ class OrderUpdate(BaseModel):
     storage_require: str | None = None
     sample_dispose: str | None = None
     test_condition: str | None = None
+    test_method: str | None = None
     criteria: str | None = None
     remark: str | None = None
     required_start: datetime | None = None

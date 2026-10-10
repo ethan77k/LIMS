@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>在线编辑 — LIMS</title>
+<style>
+  html,body{margin:0;padding:0;height:100%;background:#f4f5f7;font-family:system-ui,-apple-system,"Microsoft YaHei",sans-serif;}
+  #topbar{height:44px;box-sizing:border-box;display:flex;align-items:center;justify-content:space-between;padding:0 14px;background:#2b3a4a;color:#fff;font-size:14px;}
+  #topbar .hint{font-size:12px;opacity:.72;}
+  #topbar button{border:0;background:rgba(255,255,255,.15);color:#fff;padding:6px 14px;border-radius:4px;cursor:pointer;font-size:13px;}
+  #topbar button:hover{background:rgba(255,255,255,.28);}
+  #editor{position:absolute;top:44px;left:0;right:0;bottom:0;}
+  #loading,#error{position:absolute;top:44px;left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:center;color:#6b7a90;font-size:14px;flex-direction:column;gap:10px;text-align:center;padding:0 24px;}
+  #error{color:#c0392b;}
+</style>
+</head>
+<body>
+<div id="topbar">
+  <span id="title">在线编辑</span>
+  <span class="hint">编辑内容会自动保存回报告，完成后直接关闭本窗口</span>
+  <button onclick="window.close()">关闭窗口</button>
+</div>
+<div id="editor"></div>
+<div id="loading">正在加载 OnlyOffice 编辑器…</div>
+<div id="error" style="display:none"></div>
+<script>
+function loadOO(ooUrl){
+  return new Promise(function(resolve){
+    if(window.DocsAPI) return resolve(window.DocsAPI);
+    var s=document.getElementById('onlyoffice-api');
+    if(s){
+      var wait=function(){ if(window.DocsAPI) resolve(window.DocsAPI); else setTimeout(wait,120); };
+      wait(); return;
+    }
+    s=document.createElement('script');
+    s.id='onlyoffice-api';
+    s.src=ooUrl.replace(/\/+$/,'')+'/web-apps/apps/api/documents/api.js';
+    s.onload=function(){ resolve(window.DocsAPI); };
+    s.onerror=function(){ s.remove(); resolve(null); };
+    document.head.appendChild(s);
+  });
+}
+function showError(msg){
+  document.getElementById('loading').style.display='none';
+  var e=document.getElementById('error');
+  e.style.display='flex';
+  e.textContent=msg;
+}
+(async function main(){
+  var q=new URLSearchParams(location.search);
+  var orderId=q.get('order_id');
+  var type=q.get('type')||'检测报告';
+  var version=q.get('version')||'';
+  var format=q.get('format')||'word';
+  var token=localStorage.getItem('lims_token')||'';
+  if(!orderId){ showError('缺少 order_id 参数'); return; }
+  try{
+    var info=await fetch('/api/oo/info').then(function(r){ return r.json(); });
+    if(!info.enabled){ showError('OnlyOffice 未启用'); return; }
+    var res=await fetch('/api/reports/'+orderId+'/online-open?type='+encodeURIComponent(type)+'&version='+encodeURIComponent(version)+'&format='+encodeURIComponent(format),{
+      method:'POST',
+      headers:{'Authorization':'Bearer '+token}
+    });
+    var data=await res.json().catch(function(){ return {}; });
+    if(!res.ok){ showError((data&&data.detail)||('打开失败（HTTP '+res.status+'）')); return; }
+    document.getElementById('title').textContent='在线编辑 — '+type+(version?('（'+version+'版）'):'')+(format==='cell'?'（Excel）':'');
+    var D=await loadOO(info.url);
+    if(!D){ showError('加载 OnlyOffice 编辑器脚本失败'); return; }
+    document.getElementById('loading').style.display='none';
+    new D.DocEditor('editor', data);
+  }catch(err){
+    showError(err&&err.message?err.message:String(err));
+  }
+})();
+</script>
+</body>
+</html>

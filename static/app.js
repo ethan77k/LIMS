@@ -358,6 +358,7 @@ const OrderNew = {
       ];
       if (this.mode === 'manual') {
         required.push(['sample_count', '数量'], ['sample_unit', '单位']);
+        required.push(['test_condition', '测试条件'], ['test_method', '测试方法'], ['criteria', '判定标准']);
       }
       for (const [k, label] of required) {
         if (!this.form[k]) { toast('请填写：' + label, 'error'); return; }
@@ -499,8 +500,8 @@ const OrderNew = {
       <div class="form-group"><label><span class="req">*</span>样品处理</label><select v-model="form.sample_dispose"><option>退还</option><option>报废</option><option>留存</option></select></div>
       <div class="form-group"><label>要求完成时间</label><input type="datetime-local" v-model="form.required_start"></div>
     </div>
-    <div class="form-group" v-if="mode==='manual'"><label>试验条件</label><textarea v-model="form.test_condition"></textarea></div>
-    <div class="form-group" v-if="mode==='manual'"><label>试验条件附图（可多选，单张 ≤5MB）</label>
+    <div class="form-group" v-if="mode==='manual'"><label><span class="req">*</span>测试条件</label><textarea v-model="form.test_condition"></textarea></div>
+    <div class="form-group" v-if="mode==='manual'"><label>测试条件附图（可多选，单张 ≤5MB）</label>
       <div v-if="copiedImages.length" style="margin-bottom:6px;font-size:12px;color:var(--muted)">已从原单带入 {{copiedImages.length}} 张附图，提交后将随新单复制：</div>
       <div class="img-thumbs" v-if="copiedImages.length" style="margin-bottom:8px">
         <div v-for="(im,i) in copiedImages" :key="'c'+i" style="position:relative">
@@ -517,7 +518,8 @@ const OrderNew = {
         </div>
       </div>
     </div>
-    <div class="form-group" v-if="mode==='manual'"><label>判定标准</label><textarea v-model="form.criteria"></textarea></div>
+    <div class="form-group" v-if="mode==='manual'"><label><span class="req">*</span>测试方法</label><textarea v-model="form.test_method"></textarea></div>
+    <div class="form-group" v-if="mode==='manual'"><label><span class="req">*</span>判定标准</label><textarea v-model="form.criteria"></textarea></div>
     <div class="form-group"><label>备注</label><textarea v-model="form.remark"></textarea></div>
     <div style="margin-top:10px">
       <button class="btn primary" @click="submit">提交申请</button>
@@ -532,7 +534,7 @@ function emptyOrder() {
     test_stage: '', sample_model: '', customer_model: '', sample_count: '', sample_unit: '',
     phone: '', email: '', tracker: '', tracker_email: '', test_reason: '例行试验', report_lang: '中文',
     sample_status: '样品正常', storage_require: '常温存放', sample_dispose: '退还',
-    test_condition: '', criteria: '', remark: '', required_start: '', case_id: null,
+    test_condition: '', test_method: '', criteria: '', remark: '', required_start: '', case_id: null,
   };
 }
 
@@ -666,7 +668,7 @@ const TestCaseLibrary = {
     </div>
 
     <table class="tbl" v-if="activeGroup && activeGroup.cases.length">
-      <thead><tr><th style="width:120px">检测项目</th><th style="width:70px">数量</th><th>试验条件</th><th>判定标准</th><th style="width:120px">备注</th><th style="width:190px">图片</th><th style="width:170px">操作</th></tr></thead>
+      <thead><tr><th style="width:120px">检测项目</th><th style="width:70px">数量</th><th>测试条件</th><th>判定标准</th><th style="width:120px">备注</th><th style="width:190px">图片</th><th style="width:170px">操作</th></tr></thead>
       <tbody>
         <tr v-for="c in activeGroup.cases" :key="c.id">
           <td>{{c.test_item}}</td>
@@ -706,7 +708,7 @@ const TestCaseLibrary = {
       <div class="modal" style="width:520px">
         <h3>{{editingCaseId ? '编辑用例' : '新建用例'}}</h3>
         <div class="form-group"><label>检测项目</label><input v-model="caseForm.test_item" placeholder="如：跌落试验"></div>
-        <div class="form-group"><label>试验条件</label><textarea v-model="caseForm.test_condition" placeholder="如：1.5m 高度，3 个方向各 1 次"></textarea></div>
+        <div class="form-group"><label>测试条件</label><textarea v-model="caseForm.test_condition" placeholder="如：1.5m 高度，3 个方向各 1 次"></textarea></div>
         <div class="form-group"><label>判定标准</label><textarea v-model="caseForm.criteria" placeholder="如：无破损、无变形、功能正常"></textarea></div>
         <div class="form-row">
           <div class="form-group" style="flex:0 0 120px"><label>数量</label><input type="number" v-model.number="caseForm.count"></div>
@@ -753,7 +755,7 @@ const OrderQuery = {
         phone: o.phone, email: o.email, tracker: o.tracker, tracker_email: o.tracker_email,
         test_reason: o.test_reason, report_lang: o.report_lang,
         sample_status: o.sample_status, storage_require: o.storage_require,
-        sample_dispose: o.sample_dispose, test_condition: o.test_condition, criteria: o.criteria, remark: o.remark,
+        sample_dispose: o.sample_dispose, test_condition: o.test_condition, test_method: o.test_method, criteria: o.criteria, remark: o.remark,
         required_start: o.required_start ? String(o.required_start).slice(0, 16) : '',
       };
       this.showEdit = true;
@@ -794,7 +796,7 @@ const OrderQuery = {
         phone: o.phone || '', email: o.email || '', tracker: o.tracker || '', tracker_email: o.tracker_email || '',
         test_reason: o.test_reason || '例行试验', report_lang: o.report_lang || '中文',
         sample_status: o.sample_status || '样品正常', storage_require: o.storage_require || '常温存放', sample_dispose: o.sample_dispose || '退还',
-        test_condition: o.test_condition || '', criteria: o.criteria || '', remark: o.remark || '',
+        test_condition: o.test_condition || '', test_method: o.test_method || '', criteria: o.criteria || '', remark: o.remark || '',
         required_start: o.required_start ? String(o.required_start).slice(0, 16) : '',
         case_id: null,
         copyImages: (o.images || []).map(im => ({ id: im.id, path: im.path, filename: im.filename })),
@@ -910,7 +912,8 @@ const OrderQuery = {
         <div class="form-group"><label>存放要求</label><input v-model="editForm.storage_require"></div>
         <div class="form-group"><label>要求完成时间</label><input type="datetime-local" v-model="editForm.required_start"></div>
       </div>
-      <div class="form-group"><label>试验条件</label><textarea v-model="editForm.test_condition"></textarea></div>
+      <div class="form-group"><label>测试条件</label><textarea v-model="editForm.test_condition"></textarea></div>
+      <div class="form-group"><label>测试方法</label><textarea v-model="editForm.test_method"></textarea></div>
       <div class="form-group"><label>判定标准</label><textarea v-model="editForm.criteria"></textarea></div>
       <div class="form-group"><label>备注</label><textarea v-model="editForm.remark"></textarea></div>
       <div class="modal-actions">
@@ -934,8 +937,9 @@ const OrderQuery = {
         <tr><td class="detail-lbl">样品状态</td><td>{{detail.sample_status || '-'}}</td><td class="detail-lbl">存放要求</td><td>{{detail.storage_require || '-'}}</td></tr>
         <tr><td class="detail-lbl">样品处理</td><td>{{detail.sample_dispose || '-'}}</td><td class="detail-lbl">要求完成时间</td><td>{{fmtDT(detail.required_start) || '-'}}</td></tr>
         <tr v-if="detail.tracker || detail.tracker_email"><td class="detail-lbl">跟踪人</td><td>{{detail.tracker || '-'}}</td><td class="detail-lbl">跟踪人邮箱</td><td>{{detail.tracker_email || '-'}}</td></tr>
-        <tr v-if="detail.test_condition"><td class="detail-lbl">试验条件</td><td colspan="3" style="white-space:pre-wrap">{{detail.test_condition}}</td></tr>
-        <tr v-if="detail.images && detail.images.length"><td class="detail-lbl">试验条件附图</td><td colspan="3"><div class="img-thumbs"><a v-for="im in detail.images" :key="im.id" :href="im.path" target="_blank" :title="im.filename"><img :src="im.path" :alt="im.filename"></a></div></td></tr>
+        <tr v-if="detail.test_condition"><td class="detail-lbl">测试条件</td><td colspan="3" style="white-space:pre-wrap">{{detail.test_condition}}</td></tr>
+        <tr v-if="detail.test_method"><td class="detail-lbl">测试方法</td><td colspan="3" style="white-space:pre-wrap">{{detail.test_method}}</td></tr>
+        <tr v-if="detail.images && detail.images.length"><td class="detail-lbl">测试条件附图</td><td colspan="3"><div class="img-thumbs"><a v-for="im in detail.images" :key="im.id" :href="im.path" target="_blank" :title="im.filename"><img :src="im.path" :alt="im.filename"></a></div></td></tr>
         <tr v-if="detail.criteria"><td class="detail-lbl">判定标准</td><td colspan="3" style="white-space:pre-wrap">{{detail.criteria}}</td></tr>
         <tr v-if="detail.reject_reason"><td class="detail-lbl">否决原因</td><td colspan="3" style="color:#c62828">{{detail.reject_reason}}</td></tr>
         <tr v-if="detail.remark"><td class="detail-lbl">备注</td><td colspan="3" style="white-space:pre-wrap">{{detail.remark}}</td></tr>
@@ -1040,8 +1044,9 @@ const ReviewView = {
           <tr><td style="width:100px" class="lbl">委托单位</td><td>{{detail.entrust_org}}</td><td style="width:80px" class="lbl">委托人</td><td>{{detail.entruster}}</td></tr>
           <tr><td class="lbl">样品</td><td>{{detail.sample_model}} ×{{detail.sample_count}}{{detail.sample_unit}}</td><td class="lbl">检测项目</td><td>{{detail.test_item}}</td></tr>
           <tr><td class="lbl">检测依据</td><td colspan="3">{{detail.test_basis || '客户自定义条件'}}</td></tr>
-          <tr v-if="detail.test_condition"><td class="lbl">试验条件</td><td colspan="3" style="white-space:pre-wrap">{{detail.test_condition}}</td></tr>
-          <tr v-if="detail.images && detail.images.length"><td class="lbl">试验条件附图</td><td colspan="3"><div class="img-thumbs"><a v-for="im in detail.images" :key="im.id" :href="im.path" target="_blank" :title="im.filename"><img :src="im.path" :alt="im.filename"></a></div></td></tr>
+          <tr v-if="detail.test_condition"><td class="lbl">测试条件</td><td colspan="3" style="white-space:pre-wrap">{{detail.test_condition}}</td></tr>
+          <tr v-if="detail.test_method"><td class="lbl">测试方法</td><td colspan="3" style="white-space:pre-wrap">{{detail.test_method}}</td></tr>
+          <tr v-if="detail.images && detail.images.length"><td class="lbl">测试条件附图</td><td colspan="3"><div class="img-thumbs"><a v-for="im in detail.images" :key="im.id" :href="im.path" target="_blank" :title="im.filename"><img :src="im.path" :alt="im.filename"></a></div></td></tr>
           <tr v-if="detail.criteria"><td class="lbl">判定标准</td><td colspan="3" style="white-space:pre-wrap">{{detail.criteria}}</td></tr>
           <tr v-if="detail.case_images && detail.case_images.length"><td class="lbl">用例图片</td><td colspan="3"><div class="img-thumbs"><a v-for="im in detail.case_images" :key="im.id" :href="im.path" target="_blank" :title="im.filename"><img :src="im.path" :alt="im.filename"></a></div></td></tr>
           <tr><td class="lbl">联系电话</td><td>{{detail.phone}}</td><td class="lbl">要求时间</td><td>{{fmtDT(detail.required_start)}}</td></tr>
@@ -1832,7 +1837,7 @@ const ExperimentEndView = {
 
 /* ---------------- 实验报告 ---------------- */
 const ReportsView = {
-  data: () => ({ orders: [], cur: null, detail: null, showModal: false, tab: 'gen', drafts: {}, states: {}, editChoose: false, editShow: false, editType: '', editVersion: '', editHtml: '', editSaving: false, templates: [], tplPick: false, tplSel: '', tplName: '', tplFile: null, ooEnabled: false, ooUrl: '', ooShow: false, ooEditor: null }),
+  data: () => ({ orders: [], cur: null, detail: null, showModal: false, tab: 'gen', drafts: {}, states: {}, editChoose: false, editShow: false, editType: '', editVersion: '', editHtml: '', editSaving: false, templates: [], tplPick: false, tplSel: '', tplName: '', tplFile: null, fmtPick: false, fmtType: '', fmtVersion: '', ooEnabled: false, ooUrl: '', ooShow: false, ooEditor: null }),
   methods: {
     async load() { const q = state.role === 'experimenter' ? '&mine=1' : ''; this.orders = await api('/api/orders?status=' + q); this.loadDrafts(); },
     async loadDrafts() {
@@ -1876,11 +1881,24 @@ const ReportsView = {
     // —— 报告编辑 ——
     async openEdit(o) { this.cur = o; this.detail = await api('/api/orders/' + o.id); this.editChoose = true; },
     async startEdit(type, version) {
+      // iframe HTML 编辑器兜底（OnlyOffice 未启用时）
+      this.editChoose = false;
       try {
         const html = await api('/api/reports/edit/' + this.cur.id + '?type=' + encodeURIComponent(type) + '&version=' + encodeURIComponent(version));
         this.editType = type; this.editVersion = version; this.editHtml = html;
-        this.editChoose = false; this.editShow = true;
+        this.editShow = true;
       } catch (e) { toast(e.message, 'error'); }
+    },
+    chooseFmt(type, version) {
+      // 先选 word / cell，再新窗口打开对应 OnlyOffice
+      this.editChoose = false;
+      if (!this.ooEnabled) { this.startEdit(type, version); return; }
+      this.fmtType = type; this.fmtVersion = version;
+      this.fmtPick = true;
+    },
+    startEditFmt(fmt) {
+      this.fmtPick = false;
+      this.openOnline(this.fmtType, this.fmtVersion, fmt);
     },
     _editContent() {
       const doc = this.$refs.editFrame && this.$refs.editFrame.contentDocument;
@@ -1929,13 +1947,16 @@ const ReportsView = {
       try { const r = await api('/api/oo/info'); this.ooEnabled = !!r.enabled; this.ooUrl = r.url || ''; }
       catch (e) { this.ooEnabled = false; }
     },
-    async openOnline(type, version) {
-      try {
-        const config = await api('/api/reports/' + this.cur.id + '/online-open?type=' + encodeURIComponent(type) + '&version=' + encodeURIComponent(version), 'POST');
-        this.editType = type; this.editVersion = version;
-        this.ooShow = true;
-        this.$nextTick(() => this.mountOO(config));
-      } catch (e) { toast(e.message, 'error'); }
+    openOnline(type, version, fmt) {
+      // 在新窗口全屏打开 OnlyOffice（editor.html 自取配置并加载编辑器），避免内嵌弹窗显示不完整
+      const url = '/editor.html?order_id=' + encodeURIComponent(this.cur.id) + '&type=' + encodeURIComponent(type) + '&version=' + encodeURIComponent(version) + '&format=' + encodeURIComponent(fmt || 'word');
+      const w = window.open(url, '_blank');
+      if (!w) { toast('请允许浏览器弹出新窗口', 'error'); return; }
+      this.editType = type; this.editVersion = version;
+      // 编辑窗口关闭后刷新草稿状态，让「生成报告 / 提交审批」按钮及时可用
+      const timer = setInterval(() => {
+        if (w.closed) { clearInterval(timer); this.loadDrafts(); }
+      }, 800);
     },
     mountOO(config) {
       loadOO(this.ooUrl).then(D => {
@@ -1954,7 +1975,7 @@ const ReportsView = {
     onTplFile(e) { this.tplFile = e.target.files && e.target.files[0] || null; },
     async uploadTpl() {
       if (!this.tplName.trim()) { toast('请填写模板名称', 'error'); return; }
-      if (!this.tplFile) { toast('请选择 .docx 模板文件', 'error'); return; }
+      if (!this.tplFile) { toast('请选择模板文件', 'error'); return; }
       const fd = new FormData();
       fd.append('name', this.tplName.trim());
       fd.append('file', this.tplFile);
@@ -1973,7 +1994,7 @@ const ReportsView = {
     async setDefaultTpl(t) { await api('/api/report-templates/' + t.id + '/default', 'POST'); await this.loadTemplates(); toast('已设为默认', 'success'); },
     async delTpl(t) { if (confirm('确认删除模板「' + t.name + '」？')) { await api('/api/report-templates/' + t.id, 'DELETE'); await this.loadTemplates(); } },
     openTplPick() {
-      if (!this.templates.length) { toast('还没有报告模板，请先切到「模板库」Tab 上传 .docx 模板', 'error'); return; }
+      if (!this.templates.length) { toast('还没有报告模板，请先切到「模板库」Tab 上传 .docx / .xlsx 模板', 'error'); return; }
       const d = this.templates.find(t => t.is_default);
       this.tplSel = d ? d.name : this.templates[0].name;
       this.tplPick = true;
@@ -1981,7 +2002,10 @@ const ReportsView = {
     async startCustomEdit() {
       if (!this.tplSel) { toast('请选择模板', 'error'); return; }
       this.tplPick = false;
-      await this.startEdit('自定义报告', this.tplSel);
+      const t = this.templates.find(x => x.name === this.tplSel);
+      const fmt = (t && t.kind === 'xlsx') ? 'cell' : 'word';
+      if (this.ooEnabled) { this.openOnline('自定义报告', this.tplSel, fmt); }
+      else { await this.startEdit('自定义报告', this.tplSel); }
     },
     customDrafts(o) {
       const m = this.drafts[o.id]; if (!m) return [];
@@ -2012,14 +2036,14 @@ const ReportsView = {
       <h3>报告模板库</h3>
       <div class="toolbar" style="margin-bottom:10px">
         <input v-model="tplName" placeholder="模板名称（如：可靠性报告）" style="flex:1">
-        <input type="file" accept=".docx" @change="onTplFile">
+        <input type="file" accept=".docx,.xlsx" @change="onTplFile">
         <button class="btn primary" @click="uploadTpl">上传模板</button>
       </div>
       <p style="color:#6b7a90;font-size:12px;margin-bottom:10px">模板中可预埋占位符（如 {{委托单位}}、{{实验编号}}），生成自定义报告时系统会自动替换为委托单里的实际信息，其余内容在线手动编辑。</p>
-      <table class="tbl"><thead><tr><th>模板名称</th><th>文件</th><th>默认</th><th>上传时间</th><th>操作</th></tr></thead>
+      <table class="tbl"><thead><tr><th>模板名称</th><th>类型</th><th>文件</th><th>默认</th><th>上传时间</th><th>操作</th></tr></thead>
       <tbody>
         <tr v-for="t in templates" :key="t.id">
-          <td>{{t.name}}</td><td>{{t.filename}}</td>
+          <td>{{t.name}}</td><td><span class="badge" :class="t.kind==='xlsx'?'orange':''">{{t.kind==='xlsx'?'Excel':'Word'}}</span></td><td>{{t.filename}}</td>
           <td><span v-if="t.is_default" class="badge green">默认</span></td>
           <td>{{fmtDT(t.created_at)}}</td>
           <td>
@@ -2027,7 +2051,7 @@ const ReportsView = {
             <button class="btn link" @click="delTpl(t)">删除</button>
           </td>
         </tr>
-        <tr v-if="!templates.length"><td colspan="5" class="empty">暂无模板，请上传 .docx 模板</td></tr>
+        <tr v-if="!templates.length"><td colspan="6" class="empty">暂无模板，请上传 .docx / .xlsx 模板</td></tr>
       </tbody></table>
     </div>
     <div class="modal-mask" v-if="showModal" @click.self="showModal=false">
@@ -2064,12 +2088,21 @@ const ReportsView = {
       <div class="modal" style="width:520px">
         <h3>编辑报告 —— 选择类型</h3>
         <p style="margin-bottom:16px;color:#6b7a90">实验编号：{{cur.experiment_no||cur.order_no}}　|　{{cur.test_item}}</p>
-        <button class="btn primary" style="width:100%;margin-bottom:10px" @click="startEdit('委托记录单','')">编辑委托记录单（表-TC05-01A）</button>
+        <button class="btn primary" style="width:100%;margin-bottom:10px" @click="chooseFmt('委托记录单','')">编辑委托记录单（表-TC05-01A）</button>
         <p v-if="detail.status!=='已完成'" style="color:#b7791f;font-size:12px;margin:0 0 10px">实验未完成（当前 {{detail.status}}），检测报告需在「实验结束」中结束全部实验并填写结果后编辑</p>
-        <button class="btn" style="width:100%;margin-bottom:10px" :disabled="detail.status!=='已完成'" @click="startEdit('检测报告','常规')">编辑检测报告（常规版）</button>
-        <button class="btn" style="width:100%" :disabled="detail.status!=='已完成'" @click="startEdit('检测报告','检测')">编辑检测报告（检测版）</button>
+        <button class="btn" style="width:100%;margin-bottom:10px" :disabled="detail.status!=='已完成'" @click="chooseFmt('检测报告','常规')">编辑检测报告（常规版）</button>
+        <button class="btn" style="width:100%" :disabled="detail.status!=='已完成'" @click="chooseFmt('检测报告','检测')">编辑检测报告（检测版）</button>
         <button class="btn" style="width:100%" :disabled="detail.status!=='已完成'" @click="openTplPick()">编辑自定义报告</button>
         <div class="modal-actions"><button class="btn" @click="editChoose=false">关闭</button></div>
+      </div>
+    </div>
+    <div class="modal-mask" v-if="fmtPick" @click.self="fmtPick=false">
+      <div class="modal" style="width:420px">
+        <h3>选择编辑格式</h3>
+        <p style="margin-bottom:16px;color:#6b7a90">实验编号：{{cur.experiment_no||cur.order_no}}　|　{{fmtType}}{{fmtVersion ? '（'+fmtVersion+'版）' : ''}}</p>
+        <button class="btn primary" style="width:100%;margin-bottom:10px" @click="startEditFmt('word')">Word 版（.docx）</button>
+        <button class="btn" style="width:100%" @click="startEditFmt('cell')">Excel 版（.xlsx）</button>
+        <div class="modal-actions"><button class="btn" @click="fmtPick=false">取消</button></div>
       </div>
     </div>
     <div class="modal-mask" v-if="tplPick" @click.self="tplPick=false">
@@ -2078,7 +2111,7 @@ const ReportsView = {
         <p style="margin-bottom:12px;color:#6b7a90">实验编号：{{cur.experiment_no||cur.order_no}}　|　{{cur.test_item}}</p>
         <div v-for="t in templates" :key="t.id" style="margin-bottom:8px;display:flex;align-items:center;gap:8px">
           <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-            <input type="radio" :value="t.name" v-model="tplSel">{{t.name}}<span v-if="t.is_default" class="badge green">默认</span>
+            <input type="radio" :value="t.name" v-model="tplSel">{{t.name}}<span class="badge" :class="t.kind==='xlsx'?'orange':''">{{t.kind==='xlsx'?'Excel':'Word'}}</span><span v-if="t.is_default" class="badge green">默认</span>
           </label>
         </div>
         <div class="modal-actions">
@@ -2196,6 +2229,22 @@ const ReportArchiveView = {
         setTimeout(() => URL.revokeObjectURL(url), 2000);
       } catch (e) { toast(e.message, 'error'); }
     },
+    async downloadXlsx(r) {
+      try {
+        const headers = {};
+        if (state.token) headers['Authorization'] = 'Bearer ' + state.token;
+        const res = await fetch('/api/reports/archive/' + r.id + '/xlsx', { headers });
+        if (res.status === 401) { logout(); throw new Error('未登录或登录已过期'); }
+        if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error((d && d.detail) || '下载失败'); }
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = (r.report_no || 'report') + '_' + r.report_type + '.xlsx';
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 2000);
+      } catch (e) { toast(e.message, 'error'); }
+    },
     badge,
   },
   mounted() { this.load(); },
@@ -2207,9 +2256,9 @@ const ReportArchiveView = {
     <table class="tbl"><thead><tr><th>报告编号</th><th>委托编号</th><th>实验编号</th><th>委托单位</th><th>类型</th><th>版本</th><th>状态</th><th>签发人</th><th>签发时间</th><th>操作</th></tr></thead>
     <tbody>
       <tr v-for="r in archives" :key="r.id">
-        <td>{{r.report_no}}</td><td>{{r.order_no}}</td><td>{{r.experiment_no||'-'}}</td><td>{{r.entrust_org}}</td><td>{{r.report_type}}</td><td>{{r.version||'-'}}</td>
+        <td>{{r.report_no}}</td><td>{{r.order_no}}</td><td>{{r.experiment_no||'-'}}</td><td>{{r.entrust_org}}</td><td>{{r.report_type}}</td><td>{{r.version||'-'}}<span v-if="r.format==='cell'" class="badge orange" style="margin-left:4px">Excel</span></td>
         <td v-html="badge(r.status)"></td><td>{{r.approver_name || r.issuer_name || '-'}}</td><td>{{fmtDT(r.issued_at)}}</td>
-        <td><button class="btn link" @click="view(r)">查看</button><button class="btn link" v-if="r.has_docx" @click="downloadDocx(r)">下载Word</button><button class="btn link" v-if="state.role==='admin'" @click="del(r)">作废</button></td>
+        <td><button class="btn link" @click="view(r)">查看</button><button class="btn link" v-if="r.has_docx" @click="downloadDocx(r)">下载Word</button><button class="btn link" v-if="r.has_xlsx" @click="downloadXlsx(r)">下载Excel</button><button class="btn link" v-if="state.role==='admin'" @click="del(r)">作废</button></td>
       </tr>
       <tr v-if="!archives.length"><td colspan="10" class="empty">暂无归档报告</td></tr>
     </tbody></table>

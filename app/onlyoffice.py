@@ -159,7 +159,101 @@ def xlsx_bytes(headers: list[str], rows: list[list], sheet_name: str = "Sheet1")
 
 
 # ---------------------------------------------------------------------------
+# .xlsx 表格式报告 / .xlsx 模板占位符填充（cell 版）
+# ---------------------------------------------------------------------------
+def form_xlsx(rows: list, title: str = "", head: str = "") -> bytes:
+    """把「表格式报告」行渲染成 .xlsx。rows 每行 [(文本, 跨列, 样式), ...]；样式 label/value/sec/ok/ng/blank。"""
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+    from openpyxl.utils import get_column_letter
+
+    ncols = max((sum(c[1] for c in row) for row in rows), default=1)
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "报告"
+
+    thin = Side(style="thin", color="B0B0B0")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    center = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    left = Alignment(horizontal="left", vertical="center", wrap_text=True)
+    fill_lbl = PatternFill("solid", fgColor="F2F2F2")
+    fill_sec = PatternFill("solid", fgColor="DDEBF7")
+    fill_ok = PatternFill("solid", fgColor="C6EFCE")
+    fill_ng = PatternFill("solid", fgColor="FFC7CE")
+
+    for i in range(ncols):
+        ws.column_dimensions[get_column_letter(i + 1)].width = 12
+
+    r = 0
+    if title:
+        ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=ncols)
+        cc = ws.cell(1, 1, title)
+        cc.font = Font(bold=True, size=14)
+        cc.alignment = center
+        r = 1
+    if head:
+        r += 1
+        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=ncols)
+        cc = ws.cell(r, 1, head)
+        cc.font = Font(size=10, color="6B7A90")
+        cc.alignment = Alignment(horizontal="right", vertical="center")
+    r += 1
+
+    for row in rows:
+        col = 1
+        for text, span, kind in row:
+            cc = ws.cell(r, col, text)
+            if span > 1:
+                ws.merge_cells(start_row=r, start_column=col, end_row=r, end_column=col + span - 1)
+            cc.border = border
+            if kind == "label":
+                cc.fill = fill_lbl
+                cc.font = Font(bold=True)
+                cc.alignment = center
+            elif kind == "sec":
+                cc.fill = fill_sec
+                cc.font = Font(bold=True)
+                cc.alignment = center
+            elif kind == "ok":
+                cc.fill = fill_ok
+                cc.font = Font(bold=True)
+                cc.alignment = center
+            elif kind == "ng":
+                cc.fill = fill_ng
+                cc.font = Font(bold=True)
+                cc.alignment = center
+            else:
+                cc.alignment = left if span > 1 else center
+            col += span
+        r += 1
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def fill_xlsx_template(template_bytes: bytes, mapping: dict[str, str]) -> bytes:
+    """把 .xlsx 模板单元格里的 {{占位符}} 替换为实际值（cell 版自定义报告）。"""
+    from openpyxl import load_workbook
+
+    wb = load_workbook(io.BytesIO(template_bytes))
+    for ws in wb.worksheets:
+        for row in ws.iter_rows():
+            for cell in row:
+                if isinstance(cell.value, str):
+                    v = cell.value
+                    for k, val in mapping.items():
+                        v = v.replace("{{" + k + "}}", "" if val is None else str(val))
+                    if v != cell.value:
+                        cell.value = v
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+# ---------------------------------------------------------------------------
 # .docx 模板占位符填充（跨 run 替换，兼容 Word 把 {{占位符}} 拆到多个 run 的情况）
+
 # ---------------------------------------------------------------------------
 def fill_docx_template(template_bytes: bytes, mapping: dict[str, str]) -> bytes:
     from docx import Document
@@ -321,6 +415,29 @@ def _set_east_asia(rpr, font_name: str):
     rfonts.set(qn("w:eastAsia"), font_name)
 
 
+def _add_page_footer(doc):
+    """页脚居中页码「第 X 页 / 共 Y 页」，让内置报告 .docx 更像正式 Word 模板。"""
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    from docx.shared import Pt
+
+    p = doc.sections[0].footer.paragraphs[0]
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    def _field(code):
+        run = p.add_run()
+        begin = OxmlElement("w:fldChar"); begin.set(qn("w:fldCharType"), "begin")
+        instr = OxmlElement("w:instrText"); instr.set(qn("xml:space"), "preserve"); instr.text = code
+        end = OxmlElement("w:fldChar"); end.set(qn("w:fldCharType"), "end")
+        run._r.append(begin); run._r.append(instr); run._r.append(end)
+        return run
+
+    for run in (p.add_run("第 "), _field("PAGE"), p.add_run(" 页 / 共 "), _field("NUMPAGES"), p.add_run(" 页")):
+        run.font.size = Pt(9)
+        run.font.name = "Microsoft YaHei"
+
+
 def _setup_document(doc):
     from docx.enum.text import WD_LINE_SPACING
     from docx.shared import Cm, Pt
@@ -336,7 +453,7 @@ def _setup_document(doc):
         _set_east_asia(style.element.get_or_add_rPr(), "Microsoft YaHei")
     except Exception:
         pass
-
+    _add_page_footer(doc)
 
 def _cell_shade(cell, hexcolor: str):
     from docx.oxml import OxmlElement

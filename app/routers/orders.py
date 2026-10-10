@@ -105,6 +105,10 @@ def create_order(
         "联系电话": values.get("phone"),
         "内网邮箱": values.get("email"),
     }
+    if not values.get("case_id"):
+        _require_fields["测试方法"] = values.get("test_method")
+        _require_fields["测试条件"] = values.get("test_condition")
+        _require_fields["判定标准"] = values.get("criteria")
     missing = [k for k, v in _require_fields.items() if not str(v or "").strip()]
     if missing:
         raise HTTPException(400, "必填项缺失：" + "、".join(missing))
@@ -225,7 +229,7 @@ async def upload_order_image(
     db: Session = Depends(get_db),
     _: User | None = Depends(get_current_user_optional),
 ):
-    """为委托单上传附件图片（试验条件附图等）。委托申请本身免登录，故上传同样开放。"""
+    """为委托单上传附件图片（测试条件附图等）。委托申请本身免登录，故上传同样开放。"""
     order = db.get(EntrustOrder, order_id)
     if order is None:
         raise HTTPException(404, "委托单不存在")

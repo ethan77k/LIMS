@@ -35,8 +35,9 @@ def oo_download(key: str = Query(...), db=Depends(get_db)):
         raise HTTPException(400, "非法文档 key")
     kind = payload.get("kind")
     if kind == "report":
-        data, _name = reports.build_report_docx(db, payload["order_id"], payload["report_type"], payload["version"])
-        return Response(data, media_type=_DOCX_MT)
+        fmt = payload.get("format", "word")
+        data, _name, mime = reports.build_report_file(db, payload["order_id"], payload["report_type"], payload["version"], fmt)
+        return Response(data, media_type=mime)
     if kind == "export":
         fp = onlyoffice.work_file(key, "xlsx")
         if not fp.exists():
@@ -79,7 +80,8 @@ async def oo_callback(request: Request, db=Depends(get_db)):
         return {"error": 1}
 
     if payload.get("kind") == "report":
-        reports.save_report_docx(db, payload["order_id"], payload["report_type"], payload["version"], data)
+        fmt = payload.get("format", "word")
+        reports.save_report_file(db, payload["order_id"], payload["report_type"], payload["version"], fmt, data)
     elif payload.get("kind") == "export":
         onlyoffice.work_file(key, "xlsx").write_bytes(data)
     return {"error": 0}

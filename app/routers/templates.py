@@ -20,6 +20,7 @@ def _template_to_dict(t) -> dict:
         "id": t.id,
         "name": t.name,
         "filename": t.filename,
+        "kind": t.kind,
         "is_default": t.is_default,
         "created_at": _dt(t.created_at),
     }
@@ -42,9 +43,11 @@ async def upload_template(
     if not name:
         raise HTTPException(400, "请填写模板名称")
     if file is None:
-        raise HTTPException(400, "请选择要上传的 .docx 模板文件")
-    if os.path.splitext(file.filename or "")[1].lower() != ".docx":
-        raise HTTPException(400, "仅支持 .docx 格式的 Word 模板")
+        raise HTTPException(400, "请选择要上传的模板文件（.docx / .xlsx）")
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in (".docx", ".xlsx"):
+        raise HTTPException(400, "仅支持 .docx / .xlsx 格式的模板")
+    kind = "xlsx" if ext == ".xlsx" else "docx"
     if db.query(ReportTemplate).filter(ReportTemplate.name == name).first():
         raise HTTPException(400, "模板名称已存在，请换一个名称")
     content = await file.read()
@@ -55,7 +58,7 @@ async def upload_template(
 
     # 首个模板自动设为默认
     is_default = db.query(ReportTemplate).count() == 0
-    t = ReportTemplate(name=name, filename=file.filename or "", content=content, is_default=is_default)
+    t = ReportTemplate(name=name, filename=file.filename or "", content=content, is_default=is_default, kind=kind)
     db.add(t)
     log(db, user, "上传报告模板", "report_template", None, name)
     db.commit()

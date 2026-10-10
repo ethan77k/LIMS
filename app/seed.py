@@ -21,6 +21,7 @@ def init_db():
         _seed_users(db)
         _seed_equipment(db)
         _migrate_notifications(db)
+        _migrate_order_test_method(db)
         _migrate_criteria(db)
         _migrate_case_count_unit(db)
         _migrate_order_case_id(db)
@@ -35,6 +36,8 @@ def init_db():
         _migrate_report_docx(db)
         _migrate_report_approval(db)
         _migrate_schedules_sample_prev_status(db)
+        _migrate_report_xlsx(db)
+        _migrate_template_kind(db)
         _migrate_report_no_sy(db)
         db.commit()
     finally:
@@ -276,6 +279,30 @@ def _migrate_report_docx(db):
         cols = [row[1] for row in db.execute(text(f"PRAGMA table_info({table})"))]
         if "docx_content" not in cols:
             db.execute(text(f"ALTER TABLE {table} ADD COLUMN docx_content BLOB"))
+
+
+def _migrate_report_xlsx(db):
+    """为 reports / report_drafts 增加 xlsx_content（.xlsx 正文快照）+ format（最后保存格式）。幂等。"""
+    for table in ("reports", "report_drafts"):
+        cols = [row[1] for row in db.execute(text(f"PRAGMA table_info({table})"))]
+        if "xlsx_content" not in cols:
+            db.execute(text(f"ALTER TABLE {table} ADD COLUMN xlsx_content BLOB"))
+        if "format" not in cols:
+            db.execute(text(f"ALTER TABLE {table} ADD COLUMN format VARCHAR(8) DEFAULT 'word'"))
+
+
+def _migrate_template_kind(db):
+    """为 report_templates 增加 kind（docx/xlsx）列，支持 .xlsx 模板。幂等。"""
+    cols = [row[1] for row in db.execute(text("PRAGMA table_info(report_templates)"))]
+    if "kind" not in cols:
+        db.execute(text("ALTER TABLE report_templates ADD COLUMN kind VARCHAR(8) DEFAULT 'docx'"))
+
+
+def _migrate_order_test_method(db):
+    """为 entrust_orders 增加 test_method（测试方法）列。幂等。"""
+    cols = [row[1] for row in db.execute(text("PRAGMA table_info(entrust_orders)"))]
+    if "test_method" not in cols:
+        db.execute(text("ALTER TABLE entrust_orders ADD COLUMN test_method TEXT DEFAULT ''"))
 
 
 def _migrate_report_approval(db):

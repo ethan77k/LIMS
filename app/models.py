@@ -74,7 +74,8 @@ class EntrustOrder(Base):
     sample_status: Mapped[str] = mapped_column(String(64), default="样品正常")
     storage_require: Mapped[str] = mapped_column(String(64), default="常温存放")
     sample_dispose: Mapped[str] = mapped_column(String(16), default="退还")    # 样品处理：退还/报废/留存
-    test_condition: Mapped[str] = mapped_column(Text, default="")            # 试验条件
+    test_condition: Mapped[str] = mapped_column(Text, default="")            # 测试条件
+    test_method: Mapped[str] = mapped_column(Text, default="")               # 测试方法
     criteria: Mapped[str] = mapped_column(Text, default="")                  # 判定标准
     remark: Mapped[str] = mapped_column(Text, default="")                    # 备注
 
@@ -360,6 +361,8 @@ class Report(Base):
     status: Mapped[str] = mapped_column(String(16), default="待审批")  # 草稿 / 待审批 / 已驳回 / 已签发 / 已作废
     content: Mapped[str] = mapped_column(Text, default="")             # 报告正文快照 HTML（编辑后签发时保存，空则实时生成）
     docx_content: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)  # 报告正文快照 .docx（OnlyOffice 编辑后，打印/归档以它为准）
+    xlsx_content: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)  # 报告正文快照 .xlsx（OnlyOffice 表格编辑）
+    format: Mapped[str] = mapped_column(String(8), default="word")                  # 当前格式 word / cell（以最后保存为准）
     issuer_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)  # 提交人（实验员）
     issuer: Mapped["User | None"] = relationship("User", foreign_keys=[issuer_id])
     approver_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)  # 审批人（管理员）
@@ -382,6 +385,8 @@ class ReportDraft(Base):
     version: Mapped[str] = mapped_column(String(16), default="")       # 常规 / 检测
     content: Mapped[str] = mapped_column(Text, default="")             # 编辑后的报告正文 HTML（浏览器 HTML 编辑器）
     docx_content: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)  # 编辑后的报告正文 .docx（OnlyOffice 编辑器）
+    xlsx_content: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)  # 编辑后的报告正文 .xlsx（OnlyOffice 表格编辑）
+    format: Mapped[str] = mapped_column(String(8), default="word")                  # 最后保存格式 word / cell
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
 
@@ -396,6 +401,7 @@ class ReportTemplate(Base):
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     name: Mapped[str] = mapped_column(String(128), unique=True, index=True)  # 模板名称（唯一，作自定义报告 key）
     filename: Mapped[str] = mapped_column(String(256), default="")           # 原始文件名
+    kind: Mapped[str] = mapped_column(String(8), default="docx")              # docx / xlsx（cell 版模板）
     content: Mapped[bytes] = mapped_column(LargeBinary)                       # .docx 二进制
     is_default: Mapped[bool] = mapped_column(Boolean, default=False)          # 是否默认模板
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
@@ -425,7 +431,7 @@ class TestCase(Base):
     group: Mapped["TestCaseGroup"] = relationship("TestCaseGroup", back_populates="cases")
 
     test_item: Mapped[str] = mapped_column(String(128), default="")      # 检测项目
-    test_condition: Mapped[str] = mapped_column(Text, default="")        # 试验条件
+    test_condition: Mapped[str] = mapped_column(Text, default="")        # 测试条件
     criteria: Mapped[str] = mapped_column(Text, default="")              # 判定标准
     count: Mapped[int] = mapped_column(Integer, default=1)               # 数量
     unit: Mapped[str] = mapped_column(String(16), default="只")           # 单位
@@ -449,7 +455,7 @@ class TestCaseImage(Base):
 
 
 class OrderImage(Base):
-    """委托申请上传的附件图片（试验条件附图等）。"""
+    """委托申请上传的附件图片（测试条件附图等）。"""
 
     __tablename__ = "order_images"
 

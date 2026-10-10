@@ -89,7 +89,7 @@ def order_to_dict(o, with_detail=True) -> dict:
         "phone": o.phone, "email": o.email, "tracker": o.tracker, "tracker_email": o.tracker_email,
         "test_reason": o.test_reason, "report_lang": o.report_lang,
         "sample_status": o.sample_status, "storage_require": o.storage_require,
-        "sample_dispose": o.sample_dispose, "test_condition": o.test_condition,
+        "sample_dispose": o.sample_dispose, "test_condition": o.test_condition, "test_method": o.test_method,
         "criteria": o.criteria, "remark": o.remark,
         "required_start": _dt(o.required_start), "created_at": _dt(o.created_at),
         "reviewer_id": o.reviewer_id, "review_at": _dt(o.review_at),
@@ -155,7 +155,7 @@ def report_to_dict(r) -> dict:
     return {
         "id": r.id, "order_id": r.order_id, "report_no": r.report_no,
         "report_type": r.report_type, "version": r.version, "status": r.status,
-        "has_docx": bool(r.docx_content),
+        "has_docx": bool(r.docx_content), "has_xlsx": bool(r.xlsx_content), "format": r.format or "word",
         "issuer_id": r.issuer_id, "issuer_name": r.issuer.name if r.issuer else "",
         "approver_id": r.approver_id, "approver_name": r.approver.name if r.approver else "",
         "approved_at": _dt(r.approved_at), "reject_reason": r.reject_reason, "rejected_at": _dt(r.rejected_at),
