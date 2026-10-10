@@ -178,7 +178,7 @@ def order_image_to_dict(img) -> dict:
 def case_to_dict(c) -> dict:
     return {
         "id": c.id, "group_id": c.group_id, "group_name": c.group.name if c.group else "",
-        "test_item": c.test_item, "test_condition": c.test_condition, "criteria": c.criteria,
+        "test_item": c.test_item, "test_condition": c.test_condition, "test_method": c.test_method, "criteria": c.criteria,
         "count": c.count, "unit": c.unit,
         "remark": c.remark, "created_at": _dt(c.created_at), "updated_at": _dt(c.updated_at),
         "images": [case_image_to_dict(i) for i in sorted(c.images, key=lambda x: x.id)],

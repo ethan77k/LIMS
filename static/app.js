@@ -371,7 +371,7 @@ const OrderNew = {
           if (!cases.length) { toast('请至少勾选一个测试项', 'error'); return; }
           // 每个勾选的用例各生成一份委托单，数量/单位由用例带出，其它字段复制
           for (const c of cases) {
-            const payload = { ...this.form, test_item: c.test_item, test_condition: c.test_condition, criteria: c.criteria, sample_count: c.count, sample_unit: c.unit, case_id: c.id, required_start: this.form.required_start || null };
+            const payload = { ...this.form, test_item: c.test_item, test_condition: c.test_condition, test_method: c.test_method, criteria: c.criteria, sample_count: c.count, sample_unit: c.unit, case_id: c.id, required_start: this.form.required_start || null };
             results.push(await api('/api/orders', 'POST', payload));
           }
           toast('已生成 ' + results.length + ' 份委托单', 'success');
@@ -481,7 +481,6 @@ const OrderNew = {
     </div>
     <div class="form-row">
       <div class="form-group" v-if="mode==='manual'"><label><span class="req">*</span>检测项目</label><input v-model="form.test_item"></div>
-      <div class="form-group" v-if="mode==='manual'"><label>检测项目(英文)</label><input v-model="form.test_item_en"></div>
       <div class="form-group" style="flex:0 0 130px"><label><span class="req">*</span>测试阶段</label><select v-model="form.test_stage"><option>EVT</option><option>DVT</option><option>DVT-2</option><option>DVT-3</option><option>PVT</option><option>PVT-2</option><option>PVT-3</option><option>MP</option><option>二供</option><option>三供</option><option>四供</option><option>五供</option></select></div>
       <div class="form-group" v-if="mode==='manual'" style="flex:0 0 90px"><label><span class="req">*</span>数量</label><input type="number" v-model.number="form.sample_count"></div>
       <div class="form-group" v-if="mode==='manual'" style="flex:0 0 80px"><label><span class="req">*</span>单位</label><input v-model="form.sample_unit"></div>
@@ -608,12 +607,12 @@ const TestCaseLibrary = {
     openNewCase() {
       if (!this.activeGroup) { toast('请先选择或创建分组', 'error'); return; }
       this.editingCaseId = null;
-      this.caseForm = { group_id: this.activeGroup.id, test_item: '', test_condition: '', criteria: '', count: 1, unit: '只', remark: '' };
+      this.caseForm = { group_id: this.activeGroup.id, test_item: '', test_condition: '', test_method: '', criteria: '', count: 1, unit: '只', remark: '' };
       this.showCaseModal = true;
     },
     openEditCase(c) {
       this.editingCaseId = c.id;
-      this.caseForm = { group_id: c.group_id, test_item: c.test_item, test_condition: c.test_condition, criteria: c.criteria, count: c.count, unit: c.unit, remark: c.remark };
+      this.caseForm = { group_id: c.group_id, test_item: c.test_item, test_condition: c.test_condition, test_method: c.test_method, criteria: c.criteria, count: c.count, unit: c.unit, remark: c.remark };
       this.showCaseModal = true;
     },
     async saveCase() {
@@ -668,12 +667,13 @@ const TestCaseLibrary = {
     </div>
 
     <table class="tbl" v-if="activeGroup && activeGroup.cases.length">
-      <thead><tr><th style="width:120px">检测项目</th><th style="width:70px">数量</th><th>测试条件</th><th>判定标准</th><th style="width:120px">备注</th><th style="width:190px">图片</th><th style="width:170px">操作</th></tr></thead>
+      <thead><tr><th style="width:120px">检测项目</th><th style="width:70px">数量</th><th>测试条件</th><th>测试方法</th><th>判定标准</th><th style="width:120px">备注</th><th style="width:190px">图片</th><th style="width:170px">操作</th></tr></thead>
       <tbody>
         <tr v-for="c in activeGroup.cases" :key="c.id">
           <td>{{c.test_item}}</td>
           <td>{{c.count}}{{c.unit}}</td>
           <td style="white-space:pre-wrap">{{c.test_condition || '—'}}</td>
+          <td style="white-space:pre-wrap">{{c.test_method || '—'}}</td>
           <td style="white-space:pre-wrap">{{c.criteria || '—'}}</td>
           <td>{{c.remark || '—'}}</td>
           <td>
@@ -709,6 +709,7 @@ const TestCaseLibrary = {
         <h3>{{editingCaseId ? '编辑用例' : '新建用例'}}</h3>
         <div class="form-group"><label>检测项目</label><input v-model="caseForm.test_item" placeholder="如：跌落试验"></div>
         <div class="form-group"><label>测试条件</label><textarea v-model="caseForm.test_condition" placeholder="如：1.5m 高度，3 个方向各 1 次"></textarea></div>
+        <div class="form-group"><label>测试方法</label><textarea v-model="caseForm.test_method" placeholder="如：自由落体 / 振动 / 高低温循环"></textarea></div>
         <div class="form-group"><label>判定标准</label><textarea v-model="caseForm.criteria" placeholder="如：无破损、无变形、功能正常"></textarea></div>
         <div class="form-row">
           <div class="form-group" style="flex:0 0 120px"><label>数量</label><input type="number" v-model.number="caseForm.count"></div>
@@ -810,6 +811,25 @@ const OrderQuery = {
       try { const r = await api('/api/oo/info'); this.ooEnabled = !!r.enabled; this.ooUrl = r.url || ''; }
       catch (e) { this.ooEnabled = false; }
     },
+    async exportOrdersXlsx() {
+      try {
+        const q = new URLSearchParams();
+        if (this.status) q.set('status', this.status);
+        if (this.keyword) q.set('keyword', this.keyword);
+        const headers = {};
+        if (state.token) headers['Authorization'] = 'Bearer ' + state.token;
+        const res = await fetch('/api/export/orders/xlsx?' + q.toString(), { headers });
+        if (res.status === 401) { logout(); throw new Error('未登录或登录已过期'); }
+        if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error((d && d.detail) || '导出失败'); }
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = '委托查询_' + new Date().toISOString().slice(0, 10).replace(/-/g, '') + '.xlsx';
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 2000);
+      } catch (e) { toast(e.message, 'error'); }
+    },
     async openExcel(kind) {
       try {
         const config = await api('/api/export/online?kind=' + encodeURIComponent(kind), 'POST');
@@ -872,7 +892,7 @@ const OrderQuery = {
         <select v-model="status"><option value="">全部状态</option>
           <option v-for="s in ['待审核','已审核','已排期','实验中','已完成','已否决']" :key="s" :value="s">{{s}}</option></select>
         <input v-model="keyword" placeholder="编号/委托人/单位/型号/样品名"><button class="btn primary" @click="search">查询</button>
-        <button class="btn" v-if="ooEnabled" @click="openExcel('orders')">导出Excel(在线编辑)</button>
+        <button class="btn" @click="exportOrdersXlsx()">导出Excel</button>
       </div>
       <table class="tbl"><thead><tr><th>委托编号</th><th>实验编号</th><th>委托单位</th><th>委托人</th><th>检测项目</th><th>状态</th><th>备注</th><th>委托时间</th><th v-if="isAdmin()">操作</th></tr></thead>
       <tbody>
@@ -929,17 +949,16 @@ const OrderQuery = {
         <tr><td class="detail-lbl">委托编号</td><td>{{detail.order_no}}</td><td class="detail-lbl">状态</td><td v-html="badge(detail.status)"></td></tr>
         <tr><td class="detail-lbl">委托单位</td><td>{{detail.entrust_org}}</td><td class="detail-lbl">委托人</td><td>{{detail.entruster}}</td></tr>
         <tr><td class="detail-lbl">DHD型号</td><td>{{detail.sample_model}}</td><td class="detail-lbl">客户型号</td><td>{{detail.customer_model || '-'}}</td></tr>
-        <tr><td class="detail-lbl">样品名称</td><td>{{detail.sample_name || '-'}}</td><td class="detail-lbl">数量</td><td>{{detail.sample_count}}{{detail.sample_unit}}</td></tr>
+        <tr><td class="detail-lbl">数量</td><td>{{detail.sample_count}}{{detail.sample_unit}}</td></tr>
         <tr><td class="detail-lbl">检测项目</td><td>{{detail.test_item}}</td><td class="detail-lbl">测试阶段</td><td>{{detail.test_stage}}</td></tr>
-        <tr><td class="detail-lbl">检测依据</td><td colspan="3">{{detail.test_basis || '-'}}</td></tr>
         <tr><td class="detail-lbl">试验原因</td><td>{{detail.test_reason || '-'}}</td><td class="detail-lbl">报告要求</td><td>{{detail.report_lang || '-'}}</td></tr>
         <tr><td class="detail-lbl">联系电话</td><td>{{detail.phone}}</td><td class="detail-lbl">邮箱</td><td>{{detail.email}}</td></tr>
         <tr><td class="detail-lbl">样品状态</td><td>{{detail.sample_status || '-'}}</td><td class="detail-lbl">存放要求</td><td>{{detail.storage_require || '-'}}</td></tr>
         <tr><td class="detail-lbl">样品处理</td><td>{{detail.sample_dispose || '-'}}</td><td class="detail-lbl">要求完成时间</td><td>{{fmtDT(detail.required_start) || '-'}}</td></tr>
         <tr v-if="detail.tracker || detail.tracker_email"><td class="detail-lbl">跟踪人</td><td>{{detail.tracker || '-'}}</td><td class="detail-lbl">跟踪人邮箱</td><td>{{detail.tracker_email || '-'}}</td></tr>
         <tr v-if="detail.test_condition"><td class="detail-lbl">测试条件</td><td colspan="3" style="white-space:pre-wrap">{{detail.test_condition}}</td></tr>
-        <tr v-if="detail.test_method"><td class="detail-lbl">测试方法</td><td colspan="3" style="white-space:pre-wrap">{{detail.test_method}}</td></tr>
         <tr v-if="detail.images && detail.images.length"><td class="detail-lbl">测试条件附图</td><td colspan="3"><div class="img-thumbs"><a v-for="im in detail.images" :key="im.id" :href="im.path" target="_blank" :title="im.filename"><img :src="im.path" :alt="im.filename"></a></div></td></tr>
+        <tr v-if="detail.test_method"><td class="detail-lbl">测试方法</td><td colspan="3" style="white-space:pre-wrap">{{detail.test_method}}</td></tr>
         <tr v-if="detail.criteria"><td class="detail-lbl">判定标准</td><td colspan="3" style="white-space:pre-wrap">{{detail.criteria}}</td></tr>
         <tr v-if="detail.reject_reason"><td class="detail-lbl">否决原因</td><td colspan="3" style="color:#c62828">{{detail.reject_reason}}</td></tr>
         <tr v-if="detail.remark"><td class="detail-lbl">备注</td><td colspan="3" style="white-space:pre-wrap">{{detail.remark}}</td></tr>
@@ -1041,15 +1060,17 @@ const ReviewView = {
       <h3>审核委托申请</h3>
       <div v-if="detail">
         <table class="tbl"><tbody>
-          <tr><td style="width:100px" class="lbl">委托单位</td><td>{{detail.entrust_org}}</td><td style="width:80px" class="lbl">委托人</td><td>{{detail.entruster}}</td></tr>
-          <tr><td class="lbl">样品</td><td>{{detail.sample_model}} ×{{detail.sample_count}}{{detail.sample_unit}}</td><td class="lbl">检测项目</td><td>{{detail.test_item}}</td></tr>
-          <tr><td class="lbl">检测依据</td><td colspan="3">{{detail.test_basis || '客户自定义条件'}}</td></tr>
+          <tr><td style="width:100px" class="lbl">委托单位</td><td>{{detail.entrust_org}}</td><td style="width:90px" class="lbl">委托人</td><td>{{detail.entruster}}</td></tr>
+          <tr><td class="lbl">DHD型号</td><td>{{detail.sample_model}}</td><td class="lbl">客户型号</td><td>{{detail.customer_model || '-'}}</td></tr>
+          <tr><td class="lbl">检测项目</td><td>{{detail.test_item}}</td><td class="lbl">测试阶段</td><td>{{detail.test_stage}}</td></tr>
+          <tr><td class="lbl">数量</td><td>{{detail.sample_count}}{{detail.sample_unit}}</td><td class="lbl">试验原因</td><td>{{detail.test_reason || '-'}}</td></tr>
+          <tr><td class="lbl">报告要求</td><td>{{detail.report_lang || '-'}}</td><td class="lbl">联系电话</td><td>{{detail.phone}}</td></tr>
+          <tr><td class="lbl">DHD邮箱</td><td>{{detail.email}}</td><td class="lbl">要求完成时间</td><td>{{fmtDT(detail.required_start) || '-'}}</td></tr>
           <tr v-if="detail.test_condition"><td class="lbl">测试条件</td><td colspan="3" style="white-space:pre-wrap">{{detail.test_condition}}</td></tr>
-          <tr v-if="detail.test_method"><td class="lbl">测试方法</td><td colspan="3" style="white-space:pre-wrap">{{detail.test_method}}</td></tr>
           <tr v-if="detail.images && detail.images.length"><td class="lbl">测试条件附图</td><td colspan="3"><div class="img-thumbs"><a v-for="im in detail.images" :key="im.id" :href="im.path" target="_blank" :title="im.filename"><img :src="im.path" :alt="im.filename"></a></div></td></tr>
+          <tr v-if="detail.test_method"><td class="lbl">测试方法</td><td colspan="3" style="white-space:pre-wrap">{{detail.test_method}}</td></tr>
           <tr v-if="detail.criteria"><td class="lbl">判定标准</td><td colspan="3" style="white-space:pre-wrap">{{detail.criteria}}</td></tr>
-          <tr v-if="detail.case_images && detail.case_images.length"><td class="lbl">用例图片</td><td colspan="3"><div class="img-thumbs"><a v-for="im in detail.case_images" :key="im.id" :href="im.path" target="_blank" :title="im.filename"><img :src="im.path" :alt="im.filename"></a></div></td></tr>
-          <tr><td class="lbl">联系电话</td><td>{{detail.phone}}</td><td class="lbl">要求时间</td><td>{{fmtDT(detail.required_start)}}</td></tr>
+          <tr v-if="detail.remark"><td class="lbl">备注</td><td colspan="3" style="white-space:pre-wrap">{{detail.remark}}</td></tr>
         </tbody></table>
 
         <h4 style="margin:14px 0 8px"><span style="color:#c62828">*</span>实验员</h4>
@@ -1429,7 +1450,7 @@ const ScheduleView = {
     busyRanges() {
       if (!this.form.equipment_id) return [];
       return (this.allSchedules || [])
-        .filter(s => s.equipment_id === this.form.equipment_id && s.status === '已排期' && s.plan_start && s.plan_end)
+        .filter(s => s.equipment_id === this.form.equipment_id && s.status === '已排期' && s.plan_start && s.plan_end && s.order_id !== this.cur.id)
         .map(s => ({ start: s.plan_start, end: s.plan_end, order_no: s.order_no, sample_no: s.sample_no }))
         .sort((a, b) => new Date(a.start) - new Date(b.start));
     },

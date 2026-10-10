@@ -22,6 +22,7 @@ def init_db():
         _seed_equipment(db)
         _migrate_notifications(db)
         _migrate_order_test_method(db)
+        _migrate_case_test_method(db)
         _migrate_criteria(db)
         _migrate_case_count_unit(db)
         _migrate_order_case_id(db)
@@ -296,6 +297,13 @@ def _migrate_template_kind(db):
     cols = [row[1] for row in db.execute(text("PRAGMA table_info(report_templates)"))]
     if "kind" not in cols:
         db.execute(text("ALTER TABLE report_templates ADD COLUMN kind VARCHAR(8) DEFAULT 'docx'"))
+
+
+def _migrate_case_test_method(db):
+    """为 test_cases 增加 test_method（测试方法）列。幂等。"""
+    cols = [row[1] for row in db.execute(text("PRAGMA table_info(test_cases)"))]
+    if "test_method" not in cols:
+        db.execute(text("ALTER TABLE test_cases ADD COLUMN test_method TEXT DEFAULT ''"))
 
 
 def _migrate_order_test_method(db):

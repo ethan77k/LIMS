@@ -432,6 +432,7 @@ class TestCase(Base):
 
     test_item: Mapped[str] = mapped_column(String(128), default="")      # 检测项目
     test_condition: Mapped[str] = mapped_column(Text, default="")        # 测试条件
+    test_method: Mapped[str] = mapped_column(Text, default="")           # 测试方法
     criteria: Mapped[str] = mapped_column(Text, default="")              # 判定标准
     count: Mapped[int] = mapped_column(Integer, default=1)               # 数量
     unit: Mapped[str] = mapped_column(String(16), default="只")           # 单位

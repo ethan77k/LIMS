@@ -60,7 +60,7 @@ def create_schedule(
     if data.plan_end <= data.plan_start:
         raise HTTPException(400, "预计完成时间必须晚于预计开始时间")
 
-    # 设备（选填）：填写后校验设备存在且可用，并做设备占用冲突校验（同一设备「已排期」时间段不可重叠）
+    # 设备（选填）：填写后校验设备存在且可用，并做设备占用冲突校验（同一设备「已排期」时间段不可重叠；同一委托单内多台样品共享设备/时段不冲突）
     if data.equipment_id is not None:
         equipment = db.get(Equipment, data.equipment_id)
         if equipment is None:
@@ -74,6 +74,7 @@ def create_schedule(
                 Schedule.status == "已排期",
                 Schedule.plan_end > data.plan_start,
                 Schedule.plan_start < data.plan_end,
+                Schedule.order_id != order.id,  # 同一委托单内多台样品共享设备/时段，不算占用冲突
             )
             .all()
         )

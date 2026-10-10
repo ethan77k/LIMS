@@ -4,7 +4,7 @@ import io
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from sqlalchemy import or_
 from sqlalchemy.orm import Session, selectinload
 
@@ -210,3 +210,54 @@ def export_online_download(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+@router.get("/orders/xlsx")
+def export_orders_xlsx(
+    db: Session = Depends(get_db),
+    _: User = Depends(require_roles("admin", "experimenter")),
+    status: str | None = Query(None),
+    keyword: str | None = Query(None),
+):
+    """导出委托查询为 .xlsx 表单（字段与详情弹窗一致，跟随状态/关键字筛选）。"""
+    q = db.query(EntrustOrder)
+    if status:
+        q = q.filter(EntrustOrder.status == status)
+    if keyword:
+        like = f"%{keyword}%"
+        q = q.filter(or_(
+            EntrustOrder.order_no.like(like),
+            EntrustOrder.experiment_no.like(like),
+            EntrustOrder.entruster.like(like),
+            EntrustOrder.entrust_org.like(like),
+            EntrustOrder.sample_model.like(like),
+            EntrustOrder.sample_name.like(like),
+        ))
+    orders = q.order_by(EntrustOrder.id.desc()).all()
+
+    headers = ["委托编号", "状态", "委托单位", "委托人", "DHD型号", "客户型号", "数量",
+               "检测项目", "测试阶段", "试验原因", "报告要求", "联系电话", "邮箱",
+               "样品状态", "存放要求", "样品处理", "要求完成时间",
+               "测试条件", "测试方法", "判定标准", "备注", "委托时间"]
+
+    def _dt(v):
+        return v.strftime("%Y-%m-%d %H:%M") if v else ""
+
+    rows = [
+        [o.order_no, o.status, o.entrust_org, o.entruster, o.sample_model, o.customer_model,
+         f"{o.sample_count}{o.sample_unit}",
+         o.test_item, o.test_stage, o.test_reason, o.report_lang, o.phone, o.email,
+         o.sample_status, o.storage_require, o.sample_dispose, _dt(o.required_start),
+         o.test_condition, o.test_method, o.criteria, o.remark, _dt(o.created_at)]
+        for o in orders
+    ]
+    data = onlyoffice.xlsx_bytes(headers, rows, "委托查询")
+    from urllib.parse import quote
+
+    filename = f"委托查询_{datetime.now().strftime('%Y%m%d')}.xlsx"
+    disp = f"attachment; filename=\"orders.xlsx\"; filename*=UTF-8''{quote(filename)}"
+    return Response(
+        data,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": disp},
+    )
+

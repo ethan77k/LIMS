@@ -499,6 +499,7 @@ class TestCaseCreate(BaseModel):
     group_id: int
     test_item: str = ""
     test_condition: str = ""
+    test_method: str = ""
     criteria: str = ""
     count: int = 1
     unit: str = "只"
@@ -509,6 +510,7 @@ class TestCaseUpdate(BaseModel):
     group_id: int | None = None
     test_item: str | None = None
     test_condition: str | None = None
+    test_method: str | None = None
     criteria: str | None = None
     count: int | None = None
     unit: str | None = None
